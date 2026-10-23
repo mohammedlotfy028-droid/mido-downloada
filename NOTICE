@@ -1,0 +1,11 @@
+Mido Downloada
+Copyright (c) 2026 Mohammed Lotfy — licensed under the MIT License (see LICENSE).
+
+This product bundles aria2 (https://aria2.github.io/), a separate program that is
+run as an external executable and controlled over JSON-RPC. Its source code is not
+linked into or modified by Mido Downloada.
+
+  aria2 1.37.0 — Copyright (C) 2006, 2019 Tatsuhiro Tsujikawa
+  Licensed under the GNU General Public License, version 2 or later.
+  The full license text is included as resources/aria2/COPYING.
+  Source code: https://github.com/aria2/aria2/releases/tag/release-1.37.0

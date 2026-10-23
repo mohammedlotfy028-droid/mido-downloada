@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Fetched by `npm run fetch-aria2` (official GitHub release), not committed.
+resources/aria2/aria2c.exe
+*.log

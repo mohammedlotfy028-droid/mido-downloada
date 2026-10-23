@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+  <title>Mido Downloada</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
+      </span>
+      <span class="brand-name">Mido Downloada</span>
+    </div>
+    <div class="toolbar">
+      <button id="btn-add" class="btn primary" data-i18n="add"></button>
+      <button id="btn-resume-all" class="btn" data-i18n="resumeAll"></button>
+      <button id="btn-pause-all" class="btn" data-i18n="pauseAll"></button>
+      <span class="sep"></span>
+      <button id="btn-theme" class="btn icon" data-i18n-title="theme"></button>
+      <button id="btn-lang" class="btn" data-i18n="langSwitch"></button>
+    </div>
+  </header>
+
+  <nav class="filters" id="filters">
+    <button data-filter="all" class="chip active" data-i18n="fAll"></button>
+    <button data-filter="active" class="chip" data-i18n="fActive"></button>
+    <button data-filter="complete" class="chip" data-i18n="fComplete"></button>
+    <button data-filter="stopped" class="chip" data-i18n="fStopped"></button>
+    <span class="summary" id="summary"></span>
+  </nav>
+
+  <main>
+    <table class="list">
+      <thead>
+        <tr>
+          <th class="c-name" data-i18n="colName"></th>
+          <th class="c-size" data-i18n="colSize"></th>
+          <th class="c-progress" data-i18n="colProgress"></th>
+          <th class="c-speed" data-i18n="colSpeed"></th>
+          <th class="c-eta" data-i18n="colEta"></th>
+          <th class="c-status" data-i18n="colStatus"></th>
+          <th class="c-actions"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">
+      <p data-i18n="emptyTitle"></p>
+      <button class="btn primary" id="btn-add-empty" data-i18n="add"></button>
+    </div>
+  </main>
+
+  <!-- Add download dialog -->
+  <dialog id="dlg-add">
+    <form method="dialog" id="form-add">
+      <h2 data-i18n="addTitle"></h2>
+      <label>
+        <span data-i18n="url"></span>
+        <input id="in-url" type="url" dir="ltr" required placeholder="https://" />
+      </label>
+      <label>
+        <span data-i18n="fileName"></span>
+        <input id="in-name" type="text" dir="auto" data-i18n-placeholder="fileNameHint" />
+      </label>
+      <label>
+        <span data-i18n="saveTo"></span>
+        <div class="row">
+          <input id="in-dir" type="text" dir="ltr" required />
+          <button type="button" class="btn" id="btn-browse" data-i18n="browse"></button>
+        </div>
+      </label>
+      <label>
+        <span data-i18n="parts"></span>
+        <div class="row">
+          <input id="in-split" type="range" min="1" max="16" value="8" />
+          <output id="out-split">8</output>
+        </div>
+      </label>
+      <p class="error" id="add-error"></p>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-add-cancel" data-i18n="cancel"></button>
+        <button type="submit" class="btn primary" data-i18n="start"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Delete confirmation -->
+  <dialog id="dlg-remove">
+    <form method="dialog">
+      <h2 data-i18n="removeTitle"></h2>
+      <p id="remove-name" class="muted" dir="auto"></p>
+      <label class="check">
+        <input type="checkbox" id="in-delete-file" />
+        <span data-i18n="deleteFileToo"></span>
+      </label>
+      <div class="actions">
+        <button value="cancel" class="btn" data-i18n="cancel"></button>
+        <button value="ok" class="btn danger" data-i18n="remove"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="i18n.js"></script>
+  <script src="format.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
