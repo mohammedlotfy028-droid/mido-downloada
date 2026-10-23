@@ -1,5 +1,5 @@
 // Safe bridge between the UI and the main process (the UI has no direct Node access).
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('api', {
   openExtensionFolder: () => ipcRenderer.invoke('bridge:openExtensionFolder'),
   suggestDir: (category) => ipcRenderer.invoke('dl:suggestDir', category),
   add: (opts) => ipcRenderer.invoke('dl:add', opts),
+  chooseTorrent: () => ipcRenderer.invoke('dl:chooseTorrent'),
+  loadTorrent: (file) => ipcRenderer.invoke('dl:loadTorrent', file),
+  // Real path of a file dropped on the window (needed for .torrent files).
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  hash: (gid, algo) => ipcRenderer.invoke('dl:hash', gid, algo),
+  checkChecksum: (text) => ipcRenderer.invoke('dl:checkChecksum', text),
   pause: (gid) => ipcRenderer.invoke('dl:pause', gid),
   resume: (gid) => ipcRenderer.invoke('dl:resume', gid),
   cancel: (gid) => ipcRenderer.invoke('dl:cancel', gid),
@@ -30,4 +36,14 @@ contextBridge.exposeInMainWorld('api', {
   onDownloads: (cb) => ipcRenderer.on('downloads', (_e, list) => cb(list)),
   onOpenAdd: (cb) => ipcRenderer.on('ui:add', (_e, url, ctx) => cb(url, ctx)),
   onPairRequest: (cb) => ipcRenderer.on('ui:pair', (_e, req) => cb(req)),
+
+  cancelPower: () => ipcRenderer.invoke('power:cancel'),
+  onPower: (cb) => ipcRenderer.on('ui:power', (_e, p) => cb(p)),
+  onPowerDone: (cb) => ipcRenderer.on('ui:powerDone', (_e, a) => cb(a)),
+  updateStatus: () => ipcRenderer.invoke('update:status'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdate: (cb) => ipcRenderer.on('ui:update', (_e, s) => cb(s)),
+  // Only works when the app runs with MIDO_TEST=1.
+  testScheduleTick: (iso, reset) => ipcRenderer.invoke('test:scheduleTick', iso, reset),
 });

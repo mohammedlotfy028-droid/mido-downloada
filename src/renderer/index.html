@@ -25,6 +25,15 @@
     </div>
   </header>
 
+  <div class="banner" id="update-banner" hidden>
+    <span id="update-text"></span>
+    <button class="btn primary sm-btn" id="btn-update-install" data-i18n="restartToUpdate"></button>
+  </div>
+  <div class="banner info" id="afterdone-banner" hidden>
+    <span id="afterdone-text"></span>
+    <button class="btn sm-btn" id="btn-afterdone-off" data-i18n="cancel"></button>
+  </div>
+
   <nav class="filters" id="filters">
     <button data-filter="all" class="chip active" data-i18n="fAll"></button>
     <button data-filter="active" class="chip" data-i18n="fActive"></button>
@@ -69,7 +78,10 @@
       <h2><span data-i18n="addTitle"></span> <span class="from-browser" id="add-from-browser" data-i18n="fromBrowser" hidden></span></h2>
       <label>
         <span data-i18n="url"></span>
-        <input id="in-url" type="url" dir="ltr" required placeholder="https://" />
+        <div class="row">
+          <input id="in-url" type="text" dir="ltr" required placeholder="https://  ·  magnet:?xt=…" />
+          <button type="button" class="btn" id="btn-torrent" data-i18n="openTorrent"></button>
+        </div>
       </label>
       <div class="probe" id="probe-info" hidden></div>
       <label>
@@ -96,6 +108,10 @@
           <input id="in-limit" type="number" min="0" step="50" value="0" dir="ltr" />
         </label>
       </div>
+      <label id="lbl-checksum">
+        <span data-i18n="checksumOptional"></span>
+        <input id="in-checksum" type="text" dir="ltr" data-i18n-placeholder="checksumHint" />
+      </label>
       <p class="error" id="add-error"></p>
       <div class="actions">
         <button type="button" class="btn" id="btn-add-cancel" data-i18n="cancel"></button>
@@ -136,6 +152,47 @@
     </form>
   </dialog>
 
+  <!-- Countdown before quit / sleep / shutdown -->
+  <dialog id="dlg-power">
+    <form method="dialog">
+      <h2 id="power-title"></h2>
+      <p class="countdown" id="power-count"></p>
+      <div class="actions">
+        <button value="cancel" class="btn primary" id="btn-power-cancel" data-i18n="cancel"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Verify a finished file -->
+  <dialog id="dlg-verify" class="wide">
+    <form method="dialog">
+      <h2 data-i18n="verifyTitle"></h2>
+      <p id="verify-name" class="muted" dir="auto"></p>
+      <label>
+        <span data-i18n="verifyAlgo"></span>
+        <select id="verify-algo">
+          <option value="sha-256">SHA-256</option>
+          <option value="sha-1">SHA-1</option>
+          <option value="md5">MD5</option>
+          <option value="sha-512">SHA-512</option>
+        </select>
+      </label>
+      <label>
+        <span data-i18n="verifyResult"></span>
+        <input id="verify-hash" type="text" dir="ltr" readonly />
+      </label>
+      <label>
+        <span data-i18n="verifyCompare"></span>
+        <input id="verify-expected" type="text" dir="ltr" data-i18n-placeholder="checksumHint" />
+      </label>
+      <p class="verify-outcome" id="verify-outcome"></p>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-verify-copy" data-i18n="copy"></button>
+        <button value="close" class="btn primary" data-i18n="close"></button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Browser extension pairing request -->
   <dialog id="dlg-pair">
     <form method="dialog">
@@ -159,6 +216,7 @@
         <button type="button" class="tab" data-tab="connection" data-i18n="tabConnection"></button>
         <button type="button" class="tab" data-tab="logins" data-i18n="tabLogins"></button>
         <button type="button" class="tab" data-tab="browser" data-i18n="tabBrowser"></button>
+        <button type="button" class="tab" data-tab="schedule" data-i18n="tabSchedule"></button>
       </div>
 
       <section class="pane" data-pane="general">
@@ -208,6 +266,35 @@
         <div id="s-clients" class="clients"></div>
         <p class="hint" data-i18n="extensionHowTo"></p>
         <button type="button" class="btn" id="s-ext-folder" data-i18n="openExtFolder"></button>
+      </section>
+
+      <section class="pane" data-pane="schedule" hidden>
+        <label class="check"><input type="checkbox" id="s-sched" /><span data-i18n="scheduleEnabled"></span></label>
+        <div class="grid2">
+          <label><span data-i18n="scheduleStart"></span><input id="s-sched-start" type="time" dir="ltr" /></label>
+          <label><span data-i18n="scheduleStop"></span><input id="s-sched-stop" type="time" dir="ltr" /></label>
+        </div>
+        <div>
+          <span class="field-label" data-i18n="scheduleDays"></span>
+          <div class="days" id="s-sched-days"></div>
+        </div>
+        <p class="hint" data-i18n="scheduleHint"></p>
+        <label>
+          <span data-i18n="afterDone"></span>
+          <select id="s-afterdone">
+            <option value="nothing" data-i18n="adNothing"></option>
+            <option value="quit" data-i18n="adQuit"></option>
+            <option value="sleep" data-i18n="adSleep"></option>
+            <option value="shutdown" data-i18n="adShutdown"></option>
+          </select>
+        </label>
+        <p class="hint" data-i18n="afterDoneHint"></p>
+        <h3 data-i18n="updates"></h3>
+        <label class="check"><input type="checkbox" id="s-autoupdate" /><span data-i18n="autoUpdate"></span></label>
+        <div class="row">
+          <button type="button" class="btn" id="s-check-update" data-i18n="checkNow"></button>
+          <span class="hint" id="s-update-status"></span>
+        </div>
       </section>
 
       <div class="actions">

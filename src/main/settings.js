@@ -24,6 +24,10 @@ function defaults(downloadsDir) {
     browserEnabled: true, // accept links from the browser extension
     browserAsk: true, // show the "new download" dialog for links from the browser
     browserClients: [], // paired extensions: [{ id, name, tokenHash, pairedAt }]
+    // Start downloads at `start`, pause them at `stop` (optional), on these days (0 = Sunday).
+    schedule: { enabled: false, start: '02:00', stop: '08:00', days: [0, 1, 2, 3, 4, 5, 6] },
+    afterDone: 'nothing', // when everything finished: 'nothing' | 'quit' | 'sleep' | 'shutdown'
+    autoUpdate: true,
   };
 }
 
@@ -86,6 +90,19 @@ class Settings {
           const pass = l.pass ? encrypt(l.pass) : old ? old.pass : '';
           return { host, user: l.user, pass };
         });
+    }
+    if (patch.schedule) {
+      const s = patch.schedule;
+      const time = (v) => (/^\d{1,2}:\d{2}$/.test(String(v || '')) ? String(v) : '');
+      next.schedule = {
+        enabled: !!s.enabled,
+        start: time(s.start) || '02:00',
+        stop: time(s.stop),
+        days: (Array.isArray(s.days) ? s.days : []).map(Number).filter((d) => d >= 0 && d <= 6),
+      };
+    }
+    if ('afterDone' in patch && !['nothing', 'quit', 'sleep', 'shutdown'].includes(patch.afterDone)) {
+      next.afterDone = 'nothing';
     }
     for (const k of ['split', 'maxConcurrent', 'speedLimit', 'retryMax']) {
       if (k in next) next[k] = Math.max(0, Math.round(Number(next[k]) || 0));

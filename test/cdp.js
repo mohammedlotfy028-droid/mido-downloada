@@ -110,7 +110,7 @@ async function attach(app, debugPort, previousId = null) {
     }
   }, 20000);
   if (!target) throw new Error('no app window found');
-  const { evaluate, shot } = await connectTarget(target.webSocketDebuggerUrl);
+  const { evaluate, shot, send, click } = await connectTarget(target.webSocketDebuggerUrl);
   /** Quits the app for real (closing the window only hides it to the tray). */
   const quit = async () => {
     await evaluate('setTimeout(() => window.api.quit(), 50), true').catch(() => {});
@@ -118,7 +118,7 @@ async function attach(app, debugPort, previousId = null) {
   };
   await waitFor(() => evaluate('!!(window.api && document.querySelector("#btn-add").textContent)').catch(() => false));
   Object.assign(app, {
-    evaluate, shot, quit, targetId: target.id,
+    evaluate, shot, send, click, quit, targetId: target.id,
     reattach: () => attach(app, debugPort, target.id),
   });
   return app;

@@ -9,6 +9,8 @@ const { retryDelay } = require('./retry-policy');
 const KEYS = [
   'gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed',
   'connections', 'numPieces', 'errorCode', 'errorMessage', 'dir', 'files',
+  // BitTorrent
+  'followedBy', 'bittorrent', 'infoHash', 'numSeeders', 'uploadSpeed',
 ];
 
 function readJson(file, fallback) {
@@ -26,6 +28,12 @@ function writeJsonAtomic(file, data) {
 }
 
 function nameFromUrl(url) {
+  if (/^magnet:/i.test(url)) {
+    // magnet:?xt=urn:btih:<hash>&dn=<name>
+    const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+    const hash = (/btih:([a-z0-9]+)/i.exec(params.get('xt') || '') || [])[1] || '';
+    return params.get('dn') || `magnet ${hash.slice(0, 12)}`;
+  }
   try {
     const last = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '');
     return last || new URL(url).hostname;
@@ -92,21 +100,31 @@ class DownloadManager extends EventEmitter {
    * Adds a new download. Returns the new gid.
    * headers: extra HTTP headers such as cookies and Referer from the browser extension.
    */
-  async add({ url, dir, out, split, speedLimit = 0, category = null, headers = [], userAgent = '' }) {
+  async add({
+    url, dir, out, split, speedLimit = 0, category = null, headers = [], userAgent = '',
+    checksum = '', torrentFile = '',
+  }) {
     const secret = headers.length ? this.secrets.encrypt(JSON.stringify(headers)) : '';
+    const kind = torrentFile ? 'torrent' : /^magnet:/i.test(url) ? 'magnet' : 'http';
     // aria2 runs with --pause=true (see aria2.js), so new downloads must opt out.
     const opts = { dir, pause: 'false', ...this.secretOptions({ url, secret }) };
     if (userAgent) opts['user-agent'] = userAgent;
-    if (out) opts.out = out;
-    if (split) {
+    if (out && kind === 'http') opts.out = out;
+    if (split && kind === 'http') {
       opts.split = String(split);
       opts['max-connection-per-server'] = String(Math.min(16, split));
     }
     if (speedLimit > 0) opts['max-download-limit'] = limitValue(speedLimit);
-    const gid = await this.aria2.call('addUri', [url], opts);
+    // aria2 checks the file after downloading it ("sha-256=abc…"); a mismatch is error 32.
+    if (checksum) opts.checksum = checksum;
+    const gid =
+      kind === 'torrent'
+        ? await this.aria2.call('addTorrent', fs.readFileSync(torrentFile).toString('base64'), [], opts)
+        : await this.aria2.call('addUri', [url], opts);
     this.items[gid] = {
       gid, url, dir, out: out || '', split: split || 8, speedLimit, category, userAgent, secret,
-      name: out || nameFromUrl(url),
+      kind, torrentFile, checksum,
+      name: out || (kind === 'torrent' ? path.basename(torrentFile, '.torrent') : nameFromUrl(url)),
       addedAt: Date.now(), status: 'waiting', retries: 0,
       totalLength: 0, completedLength: 0, downloadSpeed: 0,
     };
@@ -161,12 +179,36 @@ class DownloadManager extends EventEmitter {
         errorCode: s.errorCode,
         errorMessage: s.errorMessage,
       });
-      if (filePath) {
+      const torrentName = s.bittorrent && s.bittorrent.info && s.bittorrent.info.name;
+      // A magnet link first downloads only its description ("[METADATA]…").
+      item.metadata = !!s.bittorrent && !torrentName;
+      if (s.bittorrent) {
+        item.uploadSpeed = Number(s.uploadSpeed || 0);
+        item.seeders = Number(s.numSeeders || 0);
+        item.infoHash = s.infoHash;
+      }
+      if (torrentName) {
+        item.name = torrentName;
+        // Several files -> they live in a folder with the torrent's name.
+        item.path = s.files.length > 1 ? path.join(s.dir, torrentName) : filePath;
+        item.multiFile = s.files.length > 1;
+      } else if (filePath && !item.metadata) {
         item.path = filePath;
         item.name = path.basename(filePath);
       }
-      if (item.status === 'complete' && !item.completedAt) item.completedAt = Date.now();
       if (before !== item.status + item.completedLength) this.dirty = true;
+
+      // Magnet: once the description is downloaded, aria2 starts the real download under
+      // a new gid ("followedBy"). Move our entry over to it.
+      if (s.status === 'complete' && s.followedBy && s.followedBy.length) {
+        const next = s.followedBy[0];
+        if (!this.items[next]) this.items[next] = { ...item, gid: next, status: 'waiting', metadata: false };
+        delete this.items[s.gid];
+        this.aria2.call('removeDownloadResult', s.gid).catch(() => {});
+        this.dirty = true;
+        continue;
+      }
+      if (item.status === 'complete' && !item.completedAt) item.completedAt = Date.now();
       if (prevStatus !== item.status) this.onStatusChange(item, prevStatus);
     }
     // Items aria2 no longer knows about (e.g. finished in a previous run) keep their
@@ -244,6 +286,9 @@ class DownloadManager extends EventEmitter {
         url: item.url, dir: item.dir, out, split: item.split,
         speedLimit: item.speedLimit, category: item.category,
         headers: this.headersOf(item), userAgent: item.userAgent,
+        checksum: item.checksum,
+        // A torrent is re-added from its saved .torrent file (if it's still there).
+        torrentFile: item.kind === 'torrent' && item.torrentFile && fs.existsSync(item.torrentFile) ? item.torrentFile : '',
       });
       Object.assign(this.items[newGid], {
         addedAt: item.addedAt,

@@ -129,11 +129,20 @@ function updateRow(row, d) {
   let sub = '';
   if (d.status === 'error' && d.retryAt > Date.now()) {
     sub = tr.retryIn(Math.ceil((d.retryAt - Date.now()) / 1000), (d.retries || 0) + 1, state.settings.retryMax);
+  } else if (d.status === 'error' && String(d.errorCode) === '32') {
+    sub = tr.checksumMismatch;
   } else if (d.status === 'error') {
     sub = d.errorMessage || '';
   } else if (d.status === 'waiting' && d.queuePos) {
     sub = tr.queuePos(d.queuePos);
+  } else if (d.metadata) {
+    sub = tr.metadata;
+  } else if (live && (d.kind === 'torrent' || d.kind === 'magnet')) {
+    sub = tr.torrentPeers(d.seeders || 0, Format.speed(d.uploadSpeed || 0, tr));
+  } else if (d.status === 'complete' && d.checksum) {
+    sub = tr.verified; // aria2 checked it against the checksum the user gave
   }
+  el.dataset.verified = d.status === 'complete' && d.checksum ? '1' : '';
   const subEl = el.querySelector('.sub');
   subEl.textContent = sub;
   subEl.title = sub;
@@ -189,6 +198,7 @@ async function showRowMenu(gid) {
   }
   items.push({ type: 'separator' });
   if (d.status === 'complete') items.push({ id: 'openFile', label: a.openFile });
+  if (d.status === 'complete' && !d.multiFile) items.push({ id: 'verify', label: a.verify });
   items.push({ id: 'openFolder', label: a.openFolder }, { id: 'copy', label: a.copy });
   items.push({ type: 'separator' }, { id: 'remove', label: a.remove });
   const chosen = await window.api.popupMenu(items);
@@ -231,19 +241,99 @@ async function onAction(act, gid) {
       $('#remove-name').textContent = d.name;
       $('#in-delete-file').checked = false;
       return confirmDialog($('#dlg-remove'), () => window.api.remove(gid, $('#in-delete-file').checked));
+    case 'verify':
+      return openVerify(d);
   }
+}
+
+// ---------- verify a finished file ----------
+let verifyGid = null;
+async function openVerify(d) {
+  verifyGid = d.gid;
+  $('#verify-name').textContent = d.name;
+  $('#verify-expected').value = '';
+  $('#verify-outcome').textContent = '';
+  $('#dlg-verify').showModal();
+  await computeVerifyHash();
+}
+
+async function computeVerifyHash() {
+  const gid = verifyGid;
+  $('#verify-hash').value = t().verifyWorking;
+  const hex = await window.api.hash(gid, $('#verify-algo').value);
+  if (gid !== verifyGid) return;
+  $('#verify-hash').value = hex || '—';
+  compareVerify();
+}
+
+async function compareVerify() {
+  const out = $('#verify-outcome');
+  const expected = $('#verify-expected').value.trim();
+  const actual = $('#verify-hash').value;
+  out.className = 'verify-outcome';
+  if (!expected || !/^[0-9a-f]+$/.test(actual)) {
+    out.textContent = '';
+    return;
+  }
+  const parsed = await window.api.checkChecksum(expected);
+  if (!parsed || parsed.error) {
+    out.textContent = t().badChecksum;
+    out.classList.add('bad');
+    return;
+  }
+  // The pasted code may be another algorithm: switch to it and recalculate.
+  if (parsed.algo !== $('#verify-algo').value) {
+    $('#verify-algo').value = parsed.algo;
+    return computeVerifyHash();
+  }
+  const ok = parsed.hex === actual;
+  out.textContent = ok ? t().verifyMatch : t().verifyNoMatch;
+  out.classList.add(ok ? 'good' : 'bad');
 }
 
 // ---------- add dialog ----------
 // requestId: set when the link came from the browser extension. The cookies for it stay
 // in the main process; we only pass the id back when probing/adding.
-const add = { probeSeq: 0, probeTimer: null, nameTouched: false, dirTouched: false, category: null, requestId: null, submitted: false };
+// torrent: set when a .torrent file was picked (then the URL box shows its name).
+const add = { probeSeq: 0, probeTimer: null, nameTouched: false, dirTouched: false, category: null, requestId: null, submitted: false, torrent: null };
+
+const isMagnet = (s) => /^magnet:\?xt=urn:btih:[a-z0-9]{32,40}/i.test(String(s).trim());
 
 function isValidUrl(s) {
+  if (isMagnet(s)) return true;
   try {
     return ['http:', 'https:', 'ftp:', 'sftp:'].includes(new URL(s).protocol);
   } catch {
     return false;
+  }
+}
+
+/** Switches the add dialog to "torrent file" mode. */
+function useTorrent(info) {
+  const tr = t();
+  add.torrent = info;
+  add.category = null;
+  $('#in-url').value = info.name;
+  $('#in-url').readOnly = true;
+  $('#in-name').value = '';
+  $('#in-name').disabled = true;
+  $('#lbl-checksum').hidden = true;
+  if (!add.dirTouched) $('#in-dir').value = info.dir;
+  const p = $('#probe-info');
+  p.hidden = false;
+  p.className = 'probe';
+  p.textContent = tr.torrentInfo(Format.bytes(info.size, tr), info.fileCount);
+}
+
+async function openTorrentFile(file) {
+  try {
+    const info = file ? await window.api.loadTorrent(file) : await window.api.chooseTorrent();
+    if (!info) return;
+    if (!$('#dlg-add').open) openAddDialog();
+    useTorrent(info);
+  } catch {
+    if (!$('#dlg-add').open) openAddDialog();
+    $('#add-error').textContent = t().badTorrent;
   }
 }
 
@@ -252,6 +342,12 @@ function openAddDialog(prefillUrl = '', ctx = null) {
   if (dlg.open) {
     // Already open: just put the new link in (and drop the old browser request).
     if (prefillUrl) {
+      if (add.torrent) {
+        add.torrent = null;
+        $('#in-url').readOnly = false;
+        $('#in-name').disabled = false;
+        $('#lbl-checksum').hidden = false;
+      }
       if (add.requestId && (!ctx || ctx.requestId !== add.requestId)) window.api.discardRequest(add.requestId);
       add.requestId = ctx ? ctx.requestId : null;
       $('#add-from-browser').hidden = !add.requestId;
@@ -261,9 +357,13 @@ function openAddDialog(prefillUrl = '', ctx = null) {
     }
     return;
   }
-  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false });
+  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false, torrent: null });
   $('#add-from-browser').hidden = !add.requestId;
   $('#in-url').value = prefillUrl;
+  $('#in-url').readOnly = false;
+  $('#in-name').disabled = false;
+  $('#lbl-checksum').hidden = false;
+  $('#in-checksum').value = '';
   $('#in-name').value = (ctx && ctx.name) || '';
   $('#in-dir').value = state.settings.downloadDir;
   $('#in-split').value = state.settings.split;
@@ -282,10 +382,19 @@ function scheduleProbe(delay = 500) {
 }
 
 async function runProbe() {
+  if (add.torrent) return;
   const url = $('#in-url').value.trim();
   const info = $('#probe-info');
   if (!isValidUrl(url)) {
     info.hidden = true;
+    return;
+  }
+  if (isMagnet(url)) {
+    add.category = null;
+    if (!add.dirTouched) $('#in-dir').value = state.settings.downloadDir;
+    info.hidden = false;
+    info.className = 'probe';
+    info.textContent = t().magnetInfo;
     return;
   }
   const seq = ++add.probeSeq;
@@ -313,8 +422,8 @@ async function runProbe() {
 
 async function submitAdd(e) {
   e.preventDefault();
-  const url = $('#in-url').value.trim();
-  if (!isValidUrl(url)) {
+  const url = add.torrent ? '' : $('#in-url').value.trim();
+  if (!add.torrent && !isValidUrl(url)) {
     $('#add-error').textContent = t().badUrl;
     return;
   }
@@ -322,16 +431,19 @@ async function submitAdd(e) {
     await window.api.add({
       url,
       dir: $('#in-dir').value.trim(),
-      out: $('#in-name').value.trim(),
+      out: isMagnet(url) ? '' : $('#in-name').value.trim(),
       split: Number($('#in-split').value),
       speedLimit: Number($('#in-limit').value) || 0,
       category: add.category,
       requestId: add.requestId,
+      checksum: add.torrent || isMagnet(url) ? '' : $('#in-checksum').value.trim(),
+      torrentId: add.torrent ? add.torrent.torrentId : null,
     });
     add.submitted = true;
     $('#dlg-add').close();
   } catch (err) {
-    $('#add-error').textContent = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    const msg = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    $('#add-error').textContent = msg === 'BAD_CHECKSUM' ? t().badChecksum : msg;
   }
 }
 
@@ -426,6 +538,24 @@ function openSettings() {
   $('#s-browser-ask').checked = s.browserAsk;
   settingsDraft = { browserClients: [...s.browserClients] };
   renderBrowserPane();
+  // Schedule + updates
+  $('#s-sched').checked = s.schedule.enabled;
+  $('#s-sched-start').value = s.schedule.start;
+  $('#s-sched-stop').value = s.schedule.stop;
+  const days = $('#s-sched-days');
+  days.replaceChildren(
+    ...t().days.map((name, i) => {
+      const l = document.createElement('label');
+      l.className = 'day';
+      l.innerHTML = `<input type="checkbox" value="${i}" /><span></span>`;
+      l.querySelector('input').checked = s.schedule.days.includes(i);
+      l.querySelector('span').textContent = name;
+      return l;
+    })
+  );
+  $('#s-afterdone').value = s.afterDone;
+  $('#s-autoupdate').checked = s.autoUpdate;
+  window.api.updateStatus().then(showUpdateStatus);
   showTab('general');
   confirmDialog($('#dlg-settings'), saveSettingsFromDialog);
 }
@@ -453,6 +583,14 @@ async function saveSettingsFromDialog() {
     browserEnabled: $('#s-browser').checked,
     browserAsk: $('#s-browser-ask').checked,
     browserClients: settingsDraft.browserClients.map((c) => ({ id: c.id })),
+    schedule: {
+      enabled: $('#s-sched').checked,
+      start: $('#s-sched-start').value,
+      stop: $('#s-sched-stop').value,
+      days: [...document.querySelectorAll('#s-sched-days input:checked')].map((i) => Number(i.value)),
+    },
+    afterDone: $('#s-afterdone').value,
+    autoUpdate: $('#s-autoupdate').checked,
     logins: [...document.querySelectorAll('#s-logins .login-row')].map((r) => ({
       host: r.querySelector('.l-host').value.trim(),
       user: r.querySelector('.l-user').value.trim(),
@@ -472,7 +610,7 @@ function linkFromDrop(dt) {
 function setupDragDrop() {
   const overlay = $('#drop-overlay');
   let depth = 0;
-  const hasLink = (e) => [...e.dataTransfer.types].some((ty) => ty === 'text/uri-list' || ty === 'text/plain');
+  const hasLink = (e) => [...e.dataTransfer.types].some((ty) => ty === 'text/uri-list' || ty === 'text/plain' || ty === 'Files');
   document.addEventListener('dragenter', (e) => {
     if (!hasLink(e)) return;
     depth++;
@@ -490,9 +628,61 @@ function setupDragDrop() {
     e.preventDefault();
     depth = 0;
     overlay.classList.remove('show');
+    // A .torrent file dropped from Explorer
+    const torrent = [...(e.dataTransfer.files || [])].find((f) => /\.torrent$/i.test(f.name));
+    if (torrent) {
+      const file = window.api.pathForFile(torrent);
+      if (file) openTorrentFile(file);
+      return;
+    }
     const url = linkFromDrop(e.dataTransfer);
     if (url) openAddDialog(url);
   });
+}
+
+// ---------- updates, "after done" banner, power countdown ----------
+let updateState = { state: 'idle' };
+function showUpdateStatus(s) {
+  if (!s) return;
+  updateState = s;
+  const tr = t();
+  const text = (tr.upd[s.state] || tr.upd.idle)(s.version, s);
+  $('#s-update-status').textContent = text;
+  $('#s-update-status').classList.toggle('bad', s.state === 'error');
+  $('#update-banner').hidden = s.state !== 'ready';
+  if (s.state === 'ready') $('#update-text').textContent = text;
+}
+
+function renderAfterDoneBanner() {
+  const a = state.settings.afterDone;
+  $('#afterdone-banner').hidden = a === 'nothing';
+  if (a !== 'nothing') $('#afterdone-text').textContent = t().afterDoneBanner[a];
+}
+
+let powerTick = null;
+function showPowerCountdown({ action, seconds }) {
+  const tr = t();
+  const dlg = $('#dlg-power');
+  let left = seconds;
+  $('#power-title').textContent = tr.powerTitle[action];
+  $('#power-count').textContent = tr.powerCount(left);
+  clearInterval(powerTick);
+  powerTick = setInterval(() => {
+    left = Math.max(0, left - 1);
+    $('#power-count').textContent = tr.powerCount(left);
+  }, 1000);
+  dlg.returnValue = '';
+  if (!dlg.open) dlg.showModal();
+  dlg.addEventListener(
+    'close',
+    async () => {
+      clearInterval(powerTick);
+      if (dlg.returnValue === 'cancel' || dlg.returnValue === '') await window.api.cancelPower();
+      state.settings = await window.api.getSettings();
+      renderAfterDoneBanner();
+    },
+    { once: true }
+  );
 }
 
 // ---------- startup ----------
@@ -504,6 +694,10 @@ async function init() {
   let pendingPair = [];
   window.api.onOpenAdd((url, ctx) => (ready ? openAddDialog(url, ctx) : (pendingLink = { url, ctx })));
   window.api.onPairRequest((req) => (ready ? showPairRequest(req) : pendingPair.push(req)));
+  let pendingPower = null;
+  window.api.onPower((p) => (ready ? showPowerCountdown(p) : (pendingPower = p)));
+  window.api.onPowerDone(() => $('#dlg-power').open && $('#dlg-power').close('done'));
+  window.api.onUpdate((s) => (ready ? showUpdateStatus(s) : (updateState = s)));
 
   state.settings = await window.api.getSettings();
   $('#btn-settings').innerHTML = svg('settings');
@@ -571,9 +765,25 @@ async function init() {
     add.requestId = null;
   });
 
+  // Torrent files, checksum check, updates, "after done"
+  $('#btn-torrent').onclick = () => openTorrentFile();
+  $('#verify-algo').onchange = computeVerifyHash;
+  $('#verify-expected').addEventListener('input', () => compareVerify());
+  $('#btn-verify-copy').onclick = () => window.api.copyText($('#verify-hash').value);
+  $('#btn-update-install').onclick = () => window.api.installUpdate();
+  $('#s-check-update').onclick = async () => showUpdateStatus(await window.api.checkUpdate());
+  $('#btn-afterdone-off').onclick = async () => {
+    state.settings = await window.api.setSettings({ afterDone: 'nothing' });
+    renderAfterDoneBanner();
+  };
+  $('#dlg-settings').addEventListener('close', () => setTimeout(renderAfterDoneBanner, 300));
+  renderAfterDoneBanner();
+  showUpdateStatus(await window.api.updateStatus());
+
   ready = true;
   if (pendingLink !== null) openAddDialog(pendingLink.url, pendingLink.ctx);
   pendingPair.forEach(showPairRequest);
+  if (pendingPower) showPowerCountdown(pendingPower);
   window.api.onDownloads((list) => {
     state.list = list;
     render();

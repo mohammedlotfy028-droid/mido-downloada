@@ -76,6 +76,13 @@ class Aria2 {
       '--file-allocation=trunc',
       '--disk-cache=32M',
       '--auto-file-renaming=true',
+      // BitTorrent / magnet: keep DHT data in our folder (not ~/.aria2), keep the .torrent
+      // metadata of magnet links so they resume after restart, stop seeding when done.
+      `--dht-file-path=${path.join(this.dataDir, 'dht.dat')}`,
+      `--dht-file-path6=${path.join(this.dataDir, 'dht6.dat')}`,
+      '--bt-save-metadata=true',
+      '--seed-time=0',
+      '--bt-remove-unselected-file=true',
       '--console-log-level=warn',
       '--summary-interval=0',
       '--show-console-readout=false',

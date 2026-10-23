@@ -62,8 +62,17 @@ async function openEdgeTab(url) {
 }
 /** The extension's service worker (it sleeps when idle; opening the popup wakes it). */
 async function extensionWorker() {
-  const t = await waitFor(async () => (await edgeJson('/json')).find((x) => x.type === 'service_worker' && x.url.includes(EXT_ID)), 15000);
-  return t && connectTarget(t.webSocketDebuggerUrl);
+  // The worker may still be starting (no `chrome` yet) or get replaced: retry until ready.
+  return waitFor(async () => {
+    const t = (await edgeJson('/json')).find((x) => x.type === 'service_worker' && x.url.includes(EXT_ID));
+    if (!t) return null;
+    const sw = await connectTarget(t.webSocketDebuggerUrl).catch(() => null);
+    if (!sw) return null;
+    const ok = await sw.evaluate(`typeof chrome === 'object' && !!chrome.storage && typeof getStatus === 'function'`).catch(() => false);
+    if (ok) return sw;
+    sw.close();
+    return null;
+  }, 20000, 500);
 }
 
 (async () => {

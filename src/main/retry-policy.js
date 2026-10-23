@@ -15,6 +15,7 @@ const PERMANENT = new Set([
   '18', // couldn't create directory
   '24', // HTTP authorization failed (wrong username/password)
   '28', // bad option
+  '32', // checksum doesn't match (downloading again would give the same file)
 ]);
 
 /**

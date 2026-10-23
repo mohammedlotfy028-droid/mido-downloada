@@ -240,3 +240,34 @@ dialog h3 { margin: 4px 0 -4px; font-size: 14px; }
 .client-row .hint { margin: 2px 0 0; }
 .c-title { font-weight: 500; }
 .btn.sm-text { height: 30px; padding: 0 10px; font-size: 13px; color: var(--danger); }
+
+/* ---------- phase 4 ---------- */
+.banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 10px 18px 0; padding: 8px 12px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent); font-weight: 500;
+}
+.banner.info { background: var(--surface-2); color: var(--warn); }
+.btn.sm-btn { height: 30px; padding: 0 12px; font-size: 13px; }
+.countdown { margin: 0; font-size: 28px; font-weight: 600; text-align: center; color: var(--accent); }
+dialog select {
+  height: 36px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+dialog input[type='time'] {
+  height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+.field-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.days { display: flex; flex-wrap: wrap; gap: 6px; }
+.day {
+  display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 6px !important;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text) !important; cursor: pointer;
+}
+.day input { accent-color: var(--accent); margin: 0; }
+.verify-outcome { margin: 0; min-height: 1.2em; font-weight: 600; }
+.verify-outcome.good { color: var(--accent); }
+.verify-outcome.bad { color: var(--danger); }
+#verify-hash { font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; }
+tr[data-verified='1'] .sub { color: var(--accent); }
+dialog select:focus, dialog input[type='time']:focus { outline: 2px solid var(--accent); outline-offset: -1px; }

@@ -8,6 +8,10 @@ const { DownloadManager } = require('./downloads');
 const { Settings, encrypt, decrypt } = require('./settings');
 const { probe } = require('./probe');
 const { BrowserBridge, PORT: BRIDGE_PORT } = require('./browser-bridge');
+const { readTorrent } = require('./torrent-file');
+const { Scheduler, powerAction } = require('./scheduler');
+const { Updater } = require('./updater');
+const { parseChecksum, hashFile } = require('../shared/checksum');
 const crypto = require('crypto');
 const { AppTray } = require('./tray');
 const { ClipboardWatcher } = require('./clipboard-watch');
@@ -34,6 +38,53 @@ let pollTimer = null;
 let quitting = false;
 let lastList = [];
 let bridge = null;
+let scheduler = null;
+let updater = null;
+
+// ---------- "when all downloads finish" ----------
+let wasBusy = false;
+let powerTimer = null;
+let pendingPower = null; // action to run after the app has closed cleanly
+
+function sendToUi(channel, payload) {
+  if (!win || win.isDestroyed()) return;
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => win.webContents.send(channel, payload));
+  else win.webContents.send(channel, payload);
+}
+
+function checkAfterDone(list) {
+  // Busy = something is downloading, queued, or about to be retried automatically.
+  const busy = list.some(
+    (d) => d.status === 'active' || d.status === 'waiting' || (d.status === 'error' && d.retryAt > Date.now())
+  );
+  const action = settings.values.afterDone;
+  if (wasBusy && !busy && action !== 'nothing' && !powerTimer) startPowerCountdown(action);
+  wasBusy = busy;
+}
+
+/** Shows a countdown (the user can cancel), then quits / sleeps / shuts down. */
+function startPowerCountdown(action) {
+  const seconds = Number(process.env.MIDO_POWER_DELAY) || 60;
+  showWindow();
+  sendToUi('ui:power', { action, seconds });
+  powerTimer = setTimeout(() => {
+    powerTimer = null;
+    settings.update({ afterDone: 'nothing' }); // one time only
+    sendToUi('ui:powerDone', action);
+    if (action === 'sleep') {
+      powerAction('sleep');
+    } else {
+      pendingPower = action === 'shutdown' ? 'shutdown' : null;
+      app.quit(); // the session is saved in before-quit, then the PC shuts down
+    }
+  }, seconds * 1000);
+}
+
+function cancelPowerCountdown() {
+  clearTimeout(powerTimer);
+  powerTimer = null;
+  settings.update({ afterDone: 'nothing' });
+}
 
 // Links sent by the browser extension wait here (with their cookies) until the user
 // confirms them in the dialog. The UI only ever sees the request id, never the cookies.
@@ -140,6 +191,7 @@ async function poll() {
     // (aria2's own periodic save is off because it writes passwords in plain text).
     if (++pollCount % 5 === 0) await aria2.saveSession();
     lastList = await dm.refresh();
+    checkAfterDone(lastList);
     if (tray) tray.update(lastList);
     if (win && !win.isDestroyed()) win.webContents.send('downloads', lastList);
   } catch (e) {
@@ -157,9 +209,33 @@ async function applySettings(changedKeys) {
     settings.values.clipboardWatch ? watcher.start() : watcher.stop();
   }
   if (keys.has('lang') && tray) tray.buildMenu();
+  if (keys.has('schedule') && scheduler && process.env.MIDO_TEST !== '1') {
+    scheduler.lastInside = null; // re-evaluate the new schedule right away
+    await scheduler.tick();
+  }
+  if (keys.has('autoUpdate') && updater) {
+    settings.values.autoUpdate ? updater.startAutomatic() : updater.stopAutomatic();
+  }
+}
+
+const loadedTorrents = new Map(); // id -> path of our private copy
+
+function loadTorrent(file) {
+  const info = readTorrent(file); // throws if it isn't a torrent
+  const dir = path.join(dataDir, 'torrents');
+  fs.mkdirSync(dir, { recursive: true });
+  const copy = path.join(dir, `${Date.now()}-${path.basename(file).replace(/[^\w.\- ()[\]]+/g, '_')}`);
+  fs.copyFileSync(file, copy);
+  const id = crypto.randomBytes(8).toString('hex');
+  loadedTorrents.set(id, copy);
+  return { torrentId: id, name: info.name, size: info.size, fileCount: info.files.length, dir: settings.values.downloadDir };
 }
 
 async function probeLink(url, browserReq = null) {
+  if (/^magnet:/i.test(url)) {
+    // Nothing to check over HTTP; the name/size arrive from other peers later.
+    return { ok: true, magnet: true, name: '', size: 0, type: '', resumable: true, category: null, dir: settings.values.downloadDir };
+  }
   const info = await probe(url, {
     userAgent: (browserReq && browserReq.userAgent) || settings.aria2Options()['user-agent'],
     login: settings.loginFor(url),
@@ -248,8 +324,42 @@ function registerIpc() {
   handle('dl:add', (opts) => {
     // Links from the browser carry cookies/Referer that stay in the main process.
     const req = takeBrowserRequest(opts.requestId);
-    const { requestId, ...rest } = opts;
-    return dm.add({ ...rest, headers: req ? req.headers : [], userAgent: req ? req.userAgent : '' });
+    const { requestId, checksum, torrentId, ...rest } = opts;
+    const parsed = parseChecksum(checksum); // throws BAD_CHECKSUM
+    const torrentFile = torrentId ? loadedTorrents.get(torrentId) : '';
+    if (torrentId && !torrentFile) throw new Error('torrent file is gone');
+    return dm.add({
+      ...rest,
+      checksum: parsed ? parsed.aria2 : '',
+      torrentFile: torrentFile || '',
+      headers: req ? req.headers : [],
+      userAgent: req ? req.userAgent : '',
+    });
+  });
+
+  // .torrent files: picked in a dialog or dropped on the window. We keep a private copy
+  // in the app folder so the download can resume even if the original is deleted.
+  handle('dl:chooseTorrent', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Torrent', extensions: ['torrent'] }],
+    });
+    return r.canceled ? null : loadTorrent(r.filePaths[0]);
+  });
+  handle('dl:loadTorrent', (file) => loadTorrent(file));
+
+  // Hash of a finished file, to compare with the one the website shows.
+  handle('dl:hash', async (gid, algo) => {
+    const item = dm.items[gid];
+    if (!item || !item.path || !fs.existsSync(item.path) || fs.statSync(item.path).isDirectory()) return null;
+    return hashFile(item.path, algo);
+  });
+  handle('dl:checkChecksum', (text) => {
+    try {
+      return parseChecksum(text);
+    } catch {
+      return { error: 'BAD_CHECKSUM' };
+    }
   });
   handle('dl:discardRequest', (requestId) => takeBrowserRequest(requestId));
   handle('ui:pairAnswer', (id, approved) => {
@@ -308,6 +418,21 @@ function registerIpc() {
     })
   );
   ipcMain.handle('app:quit', () => app.quit());
+
+  ipcMain.handle('power:cancel', () => cancelPowerCountdown());
+  ipcMain.handle('update:status', () => (updater ? updater.status : { state: 'unavailable', version: app.getVersion() }));
+  ipcMain.handle('update:check', () => (updater ? updater.check() : null));
+  ipcMain.handle('update:install', () => updater && updater.installNow());
+
+  // Test only: run the scheduler as if it were a given time.
+  if (process.env.MIDO_TEST === '1') {
+    ipcMain.handle('test:scheduleTick', async (_e, iso, reset) => {
+      if (reset) scheduler.lastInside = null;
+      const inside = await scheduler.tick(new Date(iso));
+      await poll();
+      return inside;
+    });
+  }
 }
 
 app.whenReady().then(async () => {
@@ -363,6 +488,25 @@ app.whenReady().then(async () => {
       onDownload: onBrowserDownload,
     });
     bridge.start();
+
+    scheduler = new Scheduler({
+      settings: () => settings.values,
+      startAll: async () => {
+        console.log('[schedule] start time: resuming downloads');
+        await dm.resumeAll();
+        poll();
+      },
+      stopAll: async () => {
+        console.log('[schedule] stop time: pausing downloads');
+        await dm.pauseAll();
+        poll();
+      },
+    });
+    // In tests the clock is driven by hand (test:scheduleTick), not by the real time.
+    if (process.env.MIDO_TEST !== '1') scheduler.start();
+
+    updater = new Updater((status) => sendToUi('ui:update', status));
+    if (settings.values.autoUpdate) updater.startAutomatic();
   } catch (e) {
     dialog.showErrorBox('Mido Downloada', `Could not start the download engine (aria2):\n${e.message}`);
     quitting = true;
@@ -403,6 +547,8 @@ app.on('before-quit', async (e) => {
   } catch (err) {
     console.error('shutdown error:', err.message);
   }
+  if (scheduler) scheduler.stop();
+  if (pendingPower) powerAction(pendingPower); // e.g. shut down after everything finished
   if (tray) tray.destroy();
   quitting = 'done';
   app.exit(0);

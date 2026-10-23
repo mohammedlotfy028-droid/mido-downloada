@@ -3,7 +3,7 @@
 برنامج إدارة تحميلات مفتوح المصدر للويندوز، مبني على Electron ومحرك [aria2](https://aria2.github.io/).
 An open-source download manager for Windows built on Electron and aria2.
 
-## Features (v0.3)
+## Features (v0.4)
 - Segmented downloads (1–16 connections, default 8)
 - Pause / resume / cancel / remove (optionally to Recycle Bin), open file / folder
 - Resumes after closing the app or a network drop; automatic retry with back-off on failures
@@ -15,6 +15,11 @@ An open-source download manager for Windows built on Electron and aria2.
 - Watches the clipboard for file links; drag & drop links on the window; Ctrl+V anywhere
 - Settings: proxy, User-Agent, default folder, saved site logins (passwords encrypted with Windows DPAPI)
 - Browser extension for Chrome / Edge (see below)
+- BitTorrent: open or drop `.torrent` files, paste `magnet:` links (stops seeding when done)
+- Checksums: give an MD5/SHA-1/SHA-256/SHA-512 when adding a download, or verify any finished file
+- Schedule: start and stop downloads at set times on chosen days (works across midnight)
+- When all downloads finish: quit, sleep or shut down the PC (after a 1-minute countdown you can cancel)
+- Automatic updates from GitHub Releases (installed app only)
 - Arabic (RTL) and English, light and dark themes
 
 ## Browser extension (Chrome / Edge)
@@ -47,12 +52,27 @@ node test/engine-test.js            # aria2 engine: segments, pause, restart, ne
 node test/ui-test.js <screenshotDir> [realUrl]   # phase 1 on the real app window
 node test/phase2-test.js <screenshotDir>          # phase 2 features on the real app window
 node test/phase3-test.js <screenshotDir>          # extension in a temporary Edge profile + the app
+node test/phase4-test.js <screenshotDir>          # torrents (local tracker+seeder), checksums, schedule, fake shutdown
+npm run dist && node test/update-test.js <dir>    # packaged app finds/downloads an update from a local server
 ```
 
 ## Build the installer
 ```bash
 npm run dist          # output in dist/
 ```
+
+## Releasing (GitHub)
+1. Put your GitHub user name instead of `CHANGE-ME` in `package.json` (`build.publish` and `repository`).
+   Automatic updates stay off until this is set.
+2. Bump `version` in `package.json`, commit, then tag and push:
+   ```bash
+   git tag v0.4.0
+   git push origin main --tags
+   ```
+3. The **Release** workflow (`.github/workflows/release.yml`) builds the installer on Windows,
+   publishes it with `latest.yml` (used by automatic updates) and attaches the extension as a zip.
+
+The installer is not code-signed, so Windows SmartScreen may warn the first time ("More info" → "Run anyway").
 
 ## License
 MIT — see [LICENSE](LICENSE). aria2 is GPLv2 and shipped as a separate executable; see [NOTICE](NOTICE).

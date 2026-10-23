@@ -53,6 +53,14 @@ http
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Disposition': 'attachment; filename="readme.txt"' });
       return res.end('hello from the test site\n');
     }
+    // Tiny BitTorrent tracker: every torrent's only peer is the test seeder (SEED_PORT).
+    if (req.url.startsWith('/announce')) {
+      const port = Number(process.env.SEED_PORT || 0);
+      const peer = Buffer.from([127, 0, 0, 1, port >> 8, port & 255]); // compact form
+      const body = Buffer.concat([Buffer.from('d8:intervali30e5:peers6:'), peer, Buffer.from('e')]);
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': body.length });
+      return res.end(body);
+    }
     if (req.url === '/__stats') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(stats));

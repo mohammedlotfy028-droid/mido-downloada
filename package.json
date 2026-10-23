@@ -1,7 +1,7 @@
 {
   "name": "mido-downloada",
   "productName": "Mido Downloada",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Open-source download manager powered by aria2",
   "main": "src/main/main.js",
   "author": "Mohammed Lotfy",
@@ -10,7 +10,8 @@
     "start": "electron .",
     "fetch-aria2": "node scripts/fetch-aria2.js",
     "dist": "electron-builder --win nsis",
-    "make-icon": "electron scripts/make-icon.js"
+    "make-icon": "electron scripts/make-icon.js",
+    "dist:publish": "electron-builder --win nsis --publish always"
   },
   "build": {
     "appId": "com.mido.downloada",
@@ -37,10 +38,25 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "CHANGE-ME",
+        "repo": "mido-downloada",
+        "releaseType": "release"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^45.0.0",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CHANGE-ME/mido-downloada.git"
   }
 }
