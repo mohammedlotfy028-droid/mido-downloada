@@ -3,6 +3,8 @@
 برنامج إدارة تحميلات مفتوح المصدر للويندوز، مبني على Electron ومحرك [aria2](https://aria2.github.io/).
 An open-source download manager for Windows built on Electron and aria2.
 
+Download: [latest release](https://github.com/mohammedlotfy028-droid/mido-downloada/releases/latest)
+
 ## Features (v0.4)
 - Segmented downloads (1–16 connections, default 8)
 - Pause / resume / cancel / remove (optionally to Recycle Bin), open file / folder
@@ -62,14 +64,12 @@ npm run dist          # output in dist/
 ```
 
 ## Releasing (GitHub)
-1. Put your GitHub user name instead of `CHANGE-ME` in `package.json` (`build.publish` and `repository`).
-   Automatic updates stay off until this is set.
-2. Bump `version` in `package.json`, commit, then tag and push:
+1. Bump `version` in `package.json`, commit, then tag and push:
    ```bash
    git tag v0.4.0
    git push origin main --tags
    ```
-3. The **Release** workflow (`.github/workflows/release.yml`) builds the installer on Windows,
+2. The **Release** workflow (`.github/workflows/release.yml`) builds the installer on Windows,
    publishes it with `latest.yml` (used by automatic updates) and attaches the extension as a zip.
 
 The installer is not code-signed, so Windows SmartScreen may warn the first time ("More info" → "Run anyway").
