@@ -7,8 +7,31 @@ const http = require('http');
 const [file, port = 8765, bps = 256 * 1024] = process.argv.slice(2);
 const size = fs.statSync(file).size;
 
+// Paths like /fail-503-3/x.bin answer HTTP 503 to the first 3 requests, then work.
+// /fail-404-0/x.bin is never found. Used to test automatic retry.
+const failures = new Map();
+
 http
   .createServer((req, res) => {
+    const f = /\/fail-(\d{3})-(\d+)\//.exec(req.url);
+    if (f) {
+      const seen = failures.get(req.url) || 0;
+      failures.set(req.url, seen + 1);
+      const [, code, times] = f;
+      if (code === '404' || seen < Number(times)) {
+        res.writeHead(Number(code));
+        return res.end();
+      }
+    }
+    // /auth/... needs HTTP Basic login test:secret ; /ua/... needs User-Agent "MidoTest/1.0"
+    if (req.url.startsWith('/auth/') && req.headers.authorization !== `Basic ${Buffer.from('test:secret').toString('base64')}`) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="test"' });
+      return res.end();
+    }
+    if (req.url.startsWith('/ua/') && req.headers['user-agent'] !== 'MidoTest/1.0') {
+      res.writeHead(403);
+      return res.end();
+    }
     let start = 0;
     let end = size - 1;
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');

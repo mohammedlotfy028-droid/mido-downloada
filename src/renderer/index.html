@@ -21,6 +21,7 @@
       <span class="sep"></span>
       <button id="btn-theme" class="btn icon" data-i18n-title="theme"></button>
       <button id="btn-lang" class="btn" data-i18n="langSwitch"></button>
+      <button id="btn-settings" class="btn icon" data-i18n-title="settings"></button>
     </div>
   </header>
 
@@ -29,6 +30,12 @@
     <button data-filter="active" class="chip" data-i18n="fActive"></button>
     <button data-filter="complete" class="chip" data-i18n="fComplete"></button>
     <button data-filter="stopped" class="chip" data-i18n="fStopped"></button>
+    <span class="sep-v"></span>
+    <button data-filter="video" class="chip" data-i18n="cat.video"></button>
+    <button data-filter="music" class="chip" data-i18n="cat.music"></button>
+    <button data-filter="programs" class="chip" data-i18n="cat.programs"></button>
+    <button data-filter="compressed" class="chip" data-i18n="cat.compressed"></button>
+    <button data-filter="documents" class="chip" data-i18n="cat.documents"></button>
     <span class="summary" id="summary"></span>
   </nav>
 
@@ -49,9 +56,12 @@
     </table>
     <div class="empty" id="empty">
       <p data-i18n="emptyTitle"></p>
+      <p class="hint" data-i18n="emptyHint"></p>
       <button class="btn primary" id="btn-add-empty" data-i18n="add"></button>
     </div>
   </main>
+
+  <div class="drop-overlay" id="drop-overlay"><div data-i18n="dropHere"></div></div>
 
   <!-- Add download dialog -->
   <dialog id="dlg-add">
@@ -61,6 +71,7 @@
         <span data-i18n="url"></span>
         <input id="in-url" type="url" dir="ltr" required placeholder="https://" />
       </label>
+      <div class="probe" id="probe-info" hidden></div>
       <label>
         <span data-i18n="fileName"></span>
         <input id="in-name" type="text" dir="auto" data-i18n-placeholder="fileNameHint" />
@@ -72,17 +83,39 @@
           <button type="button" class="btn" id="btn-browse" data-i18n="browse"></button>
         </div>
       </label>
-      <label>
-        <span data-i18n="parts"></span>
-        <div class="row">
-          <input id="in-split" type="range" min="1" max="16" value="8" />
-          <output id="out-split">8</output>
-        </div>
-      </label>
+      <div class="grid2">
+        <label>
+          <span data-i18n="parts"></span>
+          <div class="row">
+            <input id="in-split" type="range" min="1" max="16" value="8" />
+            <output id="out-split">8</output>
+          </div>
+        </label>
+        <label>
+          <span data-i18n="speedLimitFile"></span>
+          <input id="in-limit" type="number" min="0" step="50" value="0" dir="ltr" />
+        </label>
+      </div>
       <p class="error" id="add-error"></p>
       <div class="actions">
         <button type="button" class="btn" id="btn-add-cancel" data-i18n="cancel"></button>
         <button type="submit" class="btn primary" data-i18n="start"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Per-download speed limit -->
+  <dialog id="dlg-limit">
+    <form method="dialog">
+      <h2 data-i18n="speedLimitTitle"></h2>
+      <p id="limit-name" class="muted" dir="auto"></p>
+      <label>
+        <span data-i18n="speedLimitFile"></span>
+        <input id="in-item-limit" type="number" min="0" step="50" dir="ltr" />
+      </label>
+      <div class="actions">
+        <button value="cancel" class="btn" data-i18n="cancel"></button>
+        <button value="ok" class="btn primary" data-i18n="save"></button>
       </div>
     </form>
   </dialog>
@@ -99,6 +132,62 @@
       <div class="actions">
         <button value="cancel" class="btn" data-i18n="cancel"></button>
         <button value="ok" class="btn danger" data-i18n="remove"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="dlg-settings" class="wide">
+    <form method="dialog" id="form-settings">
+      <h2 data-i18n="settings"></h2>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="general" data-i18n="tabGeneral"></button>
+        <button type="button" class="tab" data-tab="connection" data-i18n="tabConnection"></button>
+        <button type="button" class="tab" data-tab="logins" data-i18n="tabLogins"></button>
+      </div>
+
+      <section class="pane" data-pane="general">
+        <label>
+          <span data-i18n="defaultDir"></span>
+          <div class="row">
+            <input id="s-dir" type="text" dir="ltr" />
+            <button type="button" class="btn" id="s-browse" data-i18n="browse"></button>
+          </div>
+        </label>
+        <label class="check"><input type="checkbox" id="s-categorize" /><span data-i18n="categorize"></span></label>
+        <p class="hint" data-i18n="categorizeHint"></p>
+        <label class="check"><input type="checkbox" id="s-clipboard" /><span data-i18n="clipboardWatch"></span></label>
+        <label class="check"><input type="checkbox" id="s-notifications" /><span data-i18n="notifications"></span></label>
+        <label class="check"><input type="checkbox" id="s-tray" /><span data-i18n="closeToTray"></span></label>
+      </section>
+
+      <section class="pane" data-pane="connection" hidden>
+        <div class="grid2">
+          <label><span data-i18n="maxConcurrent"></span><input id="s-concurrent" type="number" min="1" max="20" dir="ltr" /></label>
+          <label><span data-i18n="defaultParts"></span><input id="s-split" type="number" min="1" max="16" dir="ltr" /></label>
+          <label><span data-i18n="speedLimitAll"></span><input id="s-limit" type="number" min="0" step="50" dir="ltr" /></label>
+          <label><span data-i18n="retryMax"></span><input id="s-retry-max" type="number" min="0" max="100" dir="ltr" /></label>
+        </div>
+        <label class="check"><input type="checkbox" id="s-retry" /><span data-i18n="autoRetry"></span></label>
+        <label>
+          <span data-i18n="proxy"></span>
+          <input id="s-proxy" type="text" dir="ltr" placeholder="http://127.0.0.1:8080" />
+        </label>
+        <label>
+          <span data-i18n="userAgent"></span>
+          <input id="s-ua" type="text" dir="ltr" placeholder="Mido-Downloada/0.2" />
+        </label>
+      </section>
+
+      <section class="pane" data-pane="logins" hidden>
+        <p class="hint" data-i18n="loginsHint"></p>
+        <div id="s-logins" class="logins"></div>
+        <button type="button" class="btn" id="s-add-login" data-i18n="addLogin"></button>
+      </section>
+
+      <div class="actions">
+        <button value="cancel" class="btn" data-i18n="cancel"></button>
+        <button value="ok" class="btn primary" data-i18n="save"></button>
       </div>
     </form>
   </dialog>

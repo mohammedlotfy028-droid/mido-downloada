@@ -41,6 +41,7 @@ class Aria2 {
   async start(globalOptions = {}) {
     fs.mkdirSync(this.dataDir, { recursive: true });
     if (!fs.existsSync(this.sessionFile)) fs.writeFileSync(this.sessionFile, '');
+    stripSecrets(this.sessionFile); // in case the app crashed before cleaning it
     this.port = await getFreePort();
 
     const args = [
@@ -52,7 +53,11 @@ class Aria2 {
       // Resume after the app is closed: reload unfinished downloads from the session.
       `--input-file=${this.sessionFile}`,
       `--save-session=${this.sessionFile}`,
-      '--save-session-interval=5',
+      // No automatic session saving: aria2 writes site passwords into it as plain text,
+      // so we save it ourselves (saveSession) and strip them right away.
+      // Everything loaded from the session starts paused, so the app can put the
+      // logins back (from its encrypted settings) before anything connects.
+      '--pause=true',
       '--continue=true',
       // Survive network drops: retry forever, detect dead connections fast.
       '--max-tries=0',
@@ -76,9 +81,14 @@ class Aria2 {
       '--show-console-readout=false',
       '--quiet=false',
     ];
-    for (const [k, v] of Object.entries(globalOptions)) args.push(`--${k}=${v}`);
+    // User options replace the defaults above instead of appearing twice.
+    const overridden = new Set(Object.keys(globalOptions));
+    const finalArgs = args.filter((a) => !overridden.has(a.slice(2).split('=')[0]));
+    for (const [k, v] of Object.entries(globalOptions)) {
+      if (v !== undefined && v !== null && v !== '') finalArgs.push(`--${k}=${v}`);
+    }
 
-    this.proc = spawn(this.binPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    this.proc = spawn(this.binPath, finalArgs, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const log = (d) => {
       const text = String(d).trim();
       if (text) console.log(`[aria2] ${text}`);
@@ -120,9 +130,23 @@ class Aria2 {
     return json.result;
   }
 
+  /** Saves unfinished downloads to the session file, without usernames/passwords. */
+  async saveSession() {
+    await this.call('saveSession');
+    stripSecrets(this.sessionFile);
+  }
+
   /** Saves the session and shuts aria2 down; kills it if it doesn't exit in time. */
   async stop() {
     if (!this.proc) return;
+    try {
+      await this._shutdown();
+    } finally {
+      stripSecrets(this.sessionFile); // aria2 rewrites the session while exiting
+    }
+  }
+
+  async _shutdown() {
     const proc = this.proc;
     const exited = new Promise((resolve) => proc.once('exit', resolve));
     try {
@@ -141,4 +165,16 @@ class Aria2 {
   }
 }
 
-module.exports = { Aria2 };
+/** Removes login lines (http-user, http-passwd, ftp-user, ftp-passwd) from a session file. */
+function stripSecrets(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return;
+  }
+  const clean = text.replace(/^[ \t]+(?:http|ftp)-(?:user|passwd)=.*(?:\r?\n|$)/gm, '');
+  if (clean !== text) fs.writeFileSync(file, clean);
+}
+
+module.exports = { Aria2, stripSecrets };

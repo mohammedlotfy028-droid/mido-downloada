@@ -1,7 +1,7 @@
 {
   "name": "mido-downloada",
   "productName": "Mido Downloada",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open-source download manager powered by aria2",
   "main": "src/main/main.js",
   "author": "Mohammed Lotfy",
@@ -9,13 +9,15 @@
   "scripts": {
     "start": "electron .",
     "fetch-aria2": "node scripts/fetch-aria2.js",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "make-icon": "electron scripts/make-icon.js"
   },
   "build": {
     "appId": "com.mido.downloada",
     "productName": "Mido Downloada",
     "files": [
       "src/**/*",
+      "resources/icon.png",
       "package.json"
     ],
     "extraResources": [
@@ -25,7 +27,8 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "resources/icon.png"
     },
     "nsis": {
       "oneClick": false,

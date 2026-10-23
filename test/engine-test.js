@@ -38,7 +38,9 @@ function check(cond, msg) {
 async function boot() {
   const aria2 = new Aria2({ binPath: BIN, dataDir });
   await aria2.start();
-  return { aria2, dm: new DownloadManager({ aria2, dataDir }) };
+  const dm = new DownloadManager({ aria2, dataDir });
+  await dm.restoreAfterStart();
+  return { aria2, dm };
 }
 
 (async () => {
