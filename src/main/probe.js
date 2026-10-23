@@ -32,8 +32,13 @@ function safeFileName(name) {
 /**
  * @returns {Promise<{ok:boolean, name:string, size:number, type:string, resumable:boolean, finalUrl:string, error?:string}>}
  */
-async function probe(url, { userAgent, login } = {}) {
+async function probe(url, { userAgent, login, extraHeaders = [] } = {}) {
   const headers = { Range: 'bytes=0-0' };
+  // extraHeaders: ["Cookie: a=b", "Referer: https://…"] (from the browser extension)
+  for (const h of extraHeaders) {
+    const i = h.indexOf(':');
+    if (i > 0) headers[h.slice(0, i).trim()] = h.slice(i + 1).trim();
+  }
   if (userAgent) headers['User-Agent'] = userAgent;
   if (login) headers.Authorization = `Basic ${Buffer.from(`${login.user}:${login.pass}`).toString('base64')}`;
   const ctrl = new AbortController();

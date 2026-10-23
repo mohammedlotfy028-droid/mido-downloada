@@ -28,10 +28,10 @@ async function waitFor(fn, timeoutMs = 20000, every = 250) {
   return null;
 }
 
-async function launchApp({ dataDir, debugPort = 9333, onLog } = {}) {
+async function launchApp({ dataDir, debugPort = 9333, onLog, env = {} } = {}) {
   const electron = require(path.join(ROOT, 'node_modules', 'electron'));
   const proc = spawn(electron, [ROOT, `--remote-debugging-port=${debugPort}`], {
-    env: { ...process.env, MIDO_DATA_DIR: dataDir },
+    env: { ...process.env, MIDO_DATA_DIR: dataDir, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const logs = [];
@@ -56,19 +56,13 @@ function launchSecondInstance(dataDir) {
   return new Promise((r) => p.once('exit', r));
 }
 
-/** Connects (or reconnects, after the window was re-created) to the app's page. */
-async function attach(app, debugPort, previousId = null) {
-  const target = await waitFor(async () => {
-    try {
-      const list = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
-      return list.find((x) => x.type === 'page' && x.id !== previousId);
-    } catch {
-      return null;
-    }
-  }, 20000);
-  if (!target) throw new Error('no app window found');
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+/** Opens a DevTools connection to one target (page, service worker…). */
+async function connectTarget(wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((resolve, reject) => {
+    ws.addEventListener('open', resolve, { once: true });
+    ws.addEventListener('error', reject, { once: true });
+  });
   let id = 0;
   const pending = new Map();
   ws.addEventListener('message', (ev) => {
@@ -85,7 +79,8 @@ async function attach(app, debugPort, previousId = null) {
       ws.send(JSON.stringify({ id: mid, method, params }));
     });
   const evaluate = async (expr) => {
-    const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true });
+    if (r.error) throw new Error(`${r.error.message}\n  in: ${expr}`);
     if (r.result.exceptionDetails) throw new Error(`${r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text}\n  in: ${expr}`);
     return r.result.result.value;
   };
@@ -93,6 +88,29 @@ async function attach(app, debugPort, previousId = null) {
     const r = await send('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(file, Buffer.from(r.result.data, 'base64'));
   };
+  /** A real mouse click (counts as a user gesture) in the middle of an element. */
+  const click = async (selector) => {
+    const box = await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    }
+  };
+  return { ws, send, evaluate, shot, click, close: () => ws.close() };
+}
+
+/** Connects (or reconnects, after the window was re-created) to the app's page. */
+async function attach(app, debugPort, previousId = null) {
+  const target = await waitFor(async () => {
+    try {
+      const list = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
+      return list.find((x) => x.type === 'page' && x.id !== previousId);
+    } catch {
+      return null;
+    }
+  }, 20000);
+  if (!target) throw new Error('no app window found');
+  const { evaluate, shot } = await connectTarget(target.webSocketDebuggerUrl);
   /** Quits the app for real (closing the window only hides it to the tray). */
   const quit = async () => {
     await evaluate('setTimeout(() => window.api.quit(), 50), true').catch(() => {});
@@ -117,4 +135,4 @@ const rows = (app) =>
 /** Full item objects from the main process (path, speed in bytes, etc). */
 const items = (app) => app.evaluate('state.list');
 
-module.exports = { ROOT, sleep, check, aria2Running, waitFor, launchApp, launchSecondInstance, rows, items };
+module.exports = { ROOT, sleep, check, aria2Running, waitFor, launchApp, launchSecondInstance, connectTarget, rows, items };

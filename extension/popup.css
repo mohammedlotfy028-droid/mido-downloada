@@ -1,0 +1,40 @@
+:root {
+  --bg: #ffffff; --surface: #f3f5f7; --border: #e1e5ea; --text: #1c2026; --muted: #6b7380;
+  --accent: #0f9d8a; --accent-text: #fff; --accent-soft: #e2f5f2; --danger: #d64545; --warn: #c98a12;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e2128; --surface: #262a32; --border: #323843; --text: #e8eaee; --muted: #9198a4;
+    --accent: #2cc4ad; --accent-text: #0b1513; --accent-soft: #173a36; --danger: #f06464; --warn: #e3a93a;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  width: 340px; margin: 0; padding: 14px; background: var(--bg); color: var(--text);
+  font: 13px/1.45 'Segoe UI', Tahoma, system-ui, sans-serif;
+  display: flex; flex-direction: column; gap: 10px;
+}
+header { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.status { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border-radius: 8px; background: var(--surface); }
+.dot { flex: none; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--muted); }
+.status[data-state='connected'] .dot { background: var(--accent); }
+.status[data-state='notRunning'] .dot, .status[data-state='denied'] .dot { background: var(--danger); }
+.status[data-state='notPaired'] .dot, .status[data-state='pairing'] .dot, .status[data-state='disabled'] .dot { background: var(--warn); }
+.btn {
+  height: 32px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn.small { height: 26px; padding: 0 10px; font-size: 12px; flex: none; }
+.toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+h2 { margin: 4px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+li { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+li .info { flex: 1; min-width: 0; }
+li .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+li .meta { color: var(--muted); font-size: 11px; }
+.empty { margin: 0; color: var(--muted); }

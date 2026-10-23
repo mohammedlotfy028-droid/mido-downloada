@@ -165,7 +165,10 @@ class Aria2 {
   }
 }
 
-/** Removes login lines (http-user, http-passwd, ftp-user, ftp-passwd) from a session file. */
+/**
+ * Removes secrets from a session file: logins (http-user, http-passwd, ftp-user,
+ * ftp-passwd) and extra headers (header=, which carry browser cookies).
+ */
 function stripSecrets(file) {
   let text;
   try {
@@ -173,7 +176,7 @@ function stripSecrets(file) {
   } catch {
     return;
   }
-  const clean = text.replace(/^[ \t]+(?:http|ftp)-(?:user|passwd)=.*(?:\r?\n|$)/gm, '');
+  const clean = text.replace(/^[ \t]+(?:(?:http|ftp)-(?:user|passwd)|header)=.*(?:\r?\n|$)/gm, '');
   if (clean !== text) fs.writeFileSync(file, clean);
 }
 

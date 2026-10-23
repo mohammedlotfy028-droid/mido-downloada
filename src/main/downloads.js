@@ -43,12 +43,20 @@ class DownloadManager extends EventEmitter {
    * @param {string} o.dataDir
    * @param {(url:string) => object} [o.extraOptions] per-download aria2 options (logins...)
    * @param {() => {autoRetry:boolean, retryMax:number}} [o.retrySettings]
+   * @param {{encrypt:(s:string)=>string, decrypt:(s:string)=>string}} [o.secrets]
+   *        used for per-download headers (cookies) stored in downloads.json
    */
-  constructor({ aria2, dataDir, extraOptions = () => ({}), retrySettings = () => ({ autoRetry: false }) }) {
+  constructor({
+    aria2, dataDir,
+    extraOptions = () => ({}),
+    retrySettings = () => ({ autoRetry: false }),
+    secrets = { encrypt: (s) => s, decrypt: (s) => s },
+  }) {
     super();
     this.aria2 = aria2;
     this.extraOptions = extraOptions;
     this.retrySettings = retrySettings;
+    this.secrets = secrets;
     this.file = path.join(dataDir, 'downloads.json');
     /** @type {Record<string, any>} gid -> item */
     this.items = readJson(this.file, {});
@@ -62,10 +70,33 @@ class DownloadManager extends EventEmitter {
     this.dirty = false;
   }
 
-  /** Adds a new download. Returns the new gid. */
-  async add({ url, dir, out, split, speedLimit = 0, category = null }) {
+  /** Extra headers (e.g. "Cookie: …", "Referer: …") saved encrypted with the item. */
+  headersOf(item) {
+    if (!item.secret) return [];
+    try {
+      return JSON.parse(this.secrets.decrypt(item.secret));
+    } catch {
+      return [];
+    }
+  }
+
+  /** aria2 options that must never be written to disk in plain text. */
+  secretOptions(item) {
+    const opts = { ...this.extraOptions(item.url) };
+    const headers = this.headersOf(item);
+    if (headers.length) opts.header = headers;
+    return opts;
+  }
+
+  /**
+   * Adds a new download. Returns the new gid.
+   * headers: extra HTTP headers such as cookies and Referer from the browser extension.
+   */
+  async add({ url, dir, out, split, speedLimit = 0, category = null, headers = [], userAgent = '' }) {
+    const secret = headers.length ? this.secrets.encrypt(JSON.stringify(headers)) : '';
     // aria2 runs with --pause=true (see aria2.js), so new downloads must opt out.
-    const opts = { dir, pause: 'false', ...this.extraOptions(url) };
+    const opts = { dir, pause: 'false', ...this.secretOptions({ url, secret }) };
+    if (userAgent) opts['user-agent'] = userAgent;
     if (out) opts.out = out;
     if (split) {
       opts.split = String(split);
@@ -74,7 +105,7 @@ class DownloadManager extends EventEmitter {
     if (speedLimit > 0) opts['max-download-limit'] = limitValue(speedLimit);
     const gid = await this.aria2.call('addUri', [url], opts);
     this.items[gid] = {
-      gid, url, dir, out: out || '', split: split || 8, speedLimit, category,
+      gid, url, dir, out: out || '', split: split || 8, speedLimit, category, userAgent, secret,
       name: out || nameFromUrl(url),
       addedAt: Date.now(), status: 'waiting', retries: 0,
       totalLength: 0, completedLength: 0, downloadSpeed: 0,
@@ -95,8 +126,8 @@ class DownloadManager extends EventEmitter {
     for (const s of waiting) {
       const item = this.items[s.gid];
       if (!item) continue;
-      const login = this.extraOptions(item.url);
-      if (Object.keys(login).length) await this.aria2.call('changeOption', s.gid, login);
+      const secret = this.secretOptions(item); // site login + browser cookies
+      if (Object.keys(secret).length) await this.aria2.call('changeOption', s.gid, secret);
       if (s.status === 'paused' && lastStatus[s.gid] !== 'paused') await this.aria2.call('unpause', s.gid);
     }
   }
@@ -183,8 +214,11 @@ class DownloadManager extends EventEmitter {
     if (this.items[gid]) this.items[gid].retryAt = 0;
   }
 
+  /** Items for the UI, newest first. The encrypted headers never leave the main process. */
   list() {
-    return Object.values(this.items).sort((a, b) => b.addedAt - a.addedAt);
+    return Object.values(this.items)
+      .sort((a, b) => b.addedAt - a.addedAt)
+      .map(({ secret, ...rest }) => ({ ...rest, fromBrowser: !!secret }));
   }
 
   async pause(gid) {
@@ -209,6 +243,7 @@ class DownloadManager extends EventEmitter {
       const newGid = await this.add({
         url: item.url, dir: item.dir, out, split: item.split,
         speedLimit: item.speedLimit, category: item.category,
+        headers: this.headersOf(item), userAgent: item.userAgent,
       });
       Object.assign(this.items[newGid], {
         addedAt: item.addedAt,

@@ -21,8 +21,13 @@ function defaults(downloadsDir) {
     proxy: '', // e.g. http://127.0.0.1:8080 or http://user:pass@host:port
     userAgent: '',
     logins: [], // [{ host, user, pass (encrypted, base64) }]
+    browserEnabled: true, // accept links from the browser extension
+    browserAsk: true, // show the "new download" dialog for links from the browser
+    browserClients: [], // paired extensions: [{ id, name, tokenHash, pairedAt }]
   };
 }
+
+const sha256 = (s) => require('crypto').createHash('sha256').update(s).digest('hex');
 
 class Settings {
   constructor(dataDir, downloadsDir) {
@@ -39,17 +44,38 @@ class Settings {
     fs.writeFileSync(this.file, JSON.stringify(this.values, null, 2));
   }
 
-  /** Settings as the UI sees them (passwords replaced by a flag). */
+  /** Settings as the UI sees them (passwords and tokens left out). */
   forUi() {
     return {
       ...this.values,
       logins: this.values.logins.map((l) => ({ host: l.host, user: l.user, hasPassword: !!l.pass })),
+      browserClients: this.values.browserClients.map(({ id, name, pairedAt }) => ({ id, name, pairedAt })),
     };
+  }
+
+  /** Remembers a newly paired browser extension. Only a hash of its token is stored. */
+  addBrowserClient(name, token) {
+    const id = require('crypto').randomBytes(6).toString('hex');
+    this.values.browserClients.push({ id, name: String(name).slice(0, 80), tokenHash: sha256(token), pairedAt: Date.now() });
+    this.save();
+    return id;
+  }
+
+  /** True if this token belongs to a paired extension. */
+  isValidBrowserToken(token) {
+    if (!token) return false;
+    const h = sha256(String(token));
+    return this.values.browserClients.some((c) => c.tokenHash === h);
   }
 
   /** Applies a partial update coming from the UI. */
   update(patch) {
     const next = { ...patch };
+    if (Array.isArray(patch.browserClients)) {
+      // The UI can only remove paired browsers, never add or change them.
+      const keep = new Set(patch.browserClients.map((c) => c.id));
+      next.browserClients = this.values.browserClients.filter((c) => keep.has(c.id));
+    }
     if (Array.isArray(patch.logins)) {
       next.logins = patch.logins
         .filter((l) => l.host && l.user)
@@ -120,4 +146,4 @@ function decrypt(stored) {
   }
 }
 
-module.exports = { Settings };
+module.exports = { Settings, encrypt, decrypt };

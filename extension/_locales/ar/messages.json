@@ -1,0 +1,19 @@
+{
+  "extName": { "message": "Mido Downloada" },
+  "extDescription": { "message": "ابعت التحميلات والروابط والفيديوهات من المتصفح لبرنامج Mido Downloada." },
+  "menuDownload": { "message": "حمّل بـ Mido Downloada" },
+  "statusChecking": { "message": "بنشوف البرنامج…" },
+  "statusConnected": { "message": "متصل بـ Mido Downloada" },
+  "statusNotRunning": { "message": "Mido Downloada مش شغال. شغّل البرنامج عشان التحميلات تروح له." },
+  "statusDisabled": { "message": "استقبال التحميلات من المتصفح مقفول من إعدادات البرنامج." },
+  "statusNotPaired": { "message": "لسه مش متربط. اضغط ربط، وبعدين اسمح من البرنامج." },
+  "statusPairing": { "message": "مستنيك توافق من البرنامج…" },
+  "statusDenied": { "message": "الربط اترفض." },
+  "connect": { "message": "ربط" },
+  "captureToggle": { "message": "التقط التحميلات من المتصفح" },
+  "mediaTitle": { "message": "فيديوهات وصوتيات في الصفحة دي" },
+  "mediaEmpty": { "message": "لسه مفيش حاجة. شغّل الفيديو وافتح هنا تاني." },
+  "download": { "message": "تحميل" },
+  "sent": { "message": "اتبعت ✓" },
+  "sendFailed": { "message": "معرفناش نبعته" }
+}

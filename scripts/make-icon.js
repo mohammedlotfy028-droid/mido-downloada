@@ -28,7 +28,15 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 300));
   const img = await win.webContents.capturePage({ x: 0, y: 0, width: SIZE, height: SIZE });
   const out = path.join(__dirname, '..', 'resources', 'icon.png');
-  fs.writeFileSync(out, img.resize({ width: SIZE, height: SIZE }).toPNG());
+  const full = img.resize({ width: SIZE, height: SIZE });
+  fs.writeFileSync(out, full.toPNG());
   console.log('saved', out, img.getSize());
+  // Browser extension icons.
+  const extDir = path.join(__dirname, '..', 'extension', 'icons');
+  fs.mkdirSync(extDir, { recursive: true });
+  for (const s of [16, 32, 48, 128]) {
+    fs.writeFileSync(path.join(extDir, `${s}.png`), full.resize({ width: s, height: s, quality: 'best' }).toPNG());
+  }
+  console.log('saved extension icons in', extDir);
   app.quit();
 });

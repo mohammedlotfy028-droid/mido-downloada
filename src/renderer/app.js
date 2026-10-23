@@ -235,7 +235,9 @@ async function onAction(act, gid) {
 }
 
 // ---------- add dialog ----------
-const add = { probeSeq: 0, probeTimer: null, nameTouched: false, dirTouched: false, category: null };
+// requestId: set when the link came from the browser extension. The cookies for it stay
+// in the main process; we only pass the id back when probing/adding.
+const add = { probeSeq: 0, probeTimer: null, nameTouched: false, dirTouched: false, category: null, requestId: null, submitted: false };
 
 function isValidUrl(s) {
   try {
@@ -245,19 +247,24 @@ function isValidUrl(s) {
   }
 }
 
-function openAddDialog(prefillUrl = '') {
+function openAddDialog(prefillUrl = '', ctx = null) {
   const dlg = $('#dlg-add');
   if (dlg.open) {
-    // Already open: just put the new link in.
+    // Already open: just put the new link in (and drop the old browser request).
     if (prefillUrl) {
+      if (add.requestId && (!ctx || ctx.requestId !== add.requestId)) window.api.discardRequest(add.requestId);
+      add.requestId = ctx ? ctx.requestId : null;
+      $('#add-from-browser').hidden = !add.requestId;
       $('#in-url').value = prefillUrl;
+      if (ctx && ctx.name && !add.nameTouched) $('#in-name').value = ctx.name;
       scheduleProbe(0);
     }
     return;
   }
-  Object.assign(add, { nameTouched: false, dirTouched: false, category: null });
+  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false });
+  $('#add-from-browser').hidden = !add.requestId;
   $('#in-url').value = prefillUrl;
-  $('#in-name').value = '';
+  $('#in-name').value = (ctx && ctx.name) || '';
   $('#in-dir').value = state.settings.downloadDir;
   $('#in-split').value = state.settings.split;
   $('#out-split').textContent = state.settings.split;
@@ -286,7 +293,7 @@ async function runProbe() {
   info.hidden = false;
   info.className = 'probe loading';
   info.textContent = tr.probing;
-  const r = await window.api.probe(url);
+  const r = await window.api.probe(url, add.requestId);
   if (seq !== add.probeSeq) return; // a newer link was typed meanwhile
   add.category = r.category;
   if (!add.nameTouched && r.ok) $('#in-name').value = r.name;
@@ -319,14 +326,68 @@ async function submitAdd(e) {
       split: Number($('#in-split').value),
       speedLimit: Number($('#in-limit').value) || 0,
       category: add.category,
+      requestId: add.requestId,
     });
+    add.submitted = true;
     $('#dlg-add').close();
   } catch (err) {
     $('#add-error').textContent = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
   }
 }
 
+// ---------- browser extension ----------
+const pairQueue = [];
+function showPairRequest(req) {
+  const dlg = $('#dlg-pair');
+  if (dlg.open) {
+    pairQueue.push(req);
+    return;
+  }
+  $('#pair-name').textContent = req.name;
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.addEventListener(
+    'close',
+    async () => {
+      await window.api.answerPair(req.id, dlg.returnValue === 'allow');
+      state.settings = await window.api.getSettings();
+      if (pairQueue.length) showPairRequest(pairQueue.shift());
+    },
+    { once: true }
+  );
+}
+
+async function renderBrowserPane() {
+  const tr = t();
+  const st = await window.api.bridgeStatus();
+  $('#s-bridge-status').textContent = st.error ? tr.bridgeErr(st.error) : tr.bridgeOk(st.port);
+  $('#s-bridge-status').classList.toggle('bad', !!st.error);
+  const box = $('#s-clients');
+  if (!settingsDraft.browserClients.length) {
+    box.innerHTML = `<p class="hint"></p>`;
+    box.firstChild.textContent = tr.noClients;
+    return;
+  }
+  box.replaceChildren(
+    ...settingsDraft.browserClients.map((c) => {
+      const row = document.createElement('div');
+      row.className = 'client-row';
+      row.innerHTML = `<div><div class="c-title" dir="auto"></div><div class="hint"></div></div><button type="button" class="btn sm-text"></button>`;
+      row.querySelector('.c-title').textContent = c.name;
+      row.querySelector('.hint').textContent = tr.pairedOn(new Date(c.pairedAt).toLocaleString(state.settings.lang === 'ar' ? 'ar-EG' : 'en-GB'));
+      const btn = row.querySelector('button');
+      btn.textContent = tr.unpair;
+      btn.onclick = () => {
+        settingsDraft.browserClients = settingsDraft.browserClients.filter((x) => x.id !== c.id);
+        renderBrowserPane();
+      };
+      return row;
+    })
+  );
+}
+
 // ---------- settings dialog ----------
+let settingsDraft = { browserClients: [] };
 function loginRow(l = { host: '', user: '', hasPassword: false }) {
   const tr = t();
   const row = document.createElement('div');
@@ -361,6 +422,10 @@ function openSettings() {
   $('#s-ua').value = s.userAgent;
   const logins = $('#s-logins');
   logins.replaceChildren(...s.logins.map(loginRow));
+  $('#s-browser').checked = s.browserEnabled;
+  $('#s-browser-ask').checked = s.browserAsk;
+  settingsDraft = { browserClients: [...s.browserClients] };
+  renderBrowserPane();
   showTab('general');
   confirmDialog($('#dlg-settings'), saveSettingsFromDialog);
 }
@@ -385,6 +450,9 @@ async function saveSettingsFromDialog() {
     retryMax: clamp($('#s-retry-max').value, 0, 100),
     proxy: $('#s-proxy').value.trim(),
     userAgent: $('#s-ua').value.trim(),
+    browserEnabled: $('#s-browser').checked,
+    browserAsk: $('#s-browser-ask').checked,
+    browserClients: settingsDraft.browserClients.map((c) => ({ id: c.id })),
     logins: [...document.querySelectorAll('#s-logins .login-row')].map((r) => ({
       host: r.querySelector('.l-host').value.trim(),
       user: r.querySelector('.l-user').value.trim(),
@@ -429,10 +497,13 @@ function setupDragDrop() {
 
 // ---------- startup ----------
 async function init() {
-  // Listen right away: a link can arrive (clipboard/tray) while settings are still loading.
+  // Listen right away: a link (clipboard/tray/browser) or a pairing request can arrive
+  // while settings are still loading.
   let ready = false;
   let pendingLink = null;
-  window.api.onOpenAdd((url) => (ready ? openAddDialog(url) : (pendingLink = url)));
+  let pendingPair = [];
+  window.api.onOpenAdd((url, ctx) => (ready ? openAddDialog(url, ctx) : (pendingLink = { url, ctx })));
+  window.api.onPairRequest((req) => (ready ? showPairRequest(req) : pendingPair.push(req)));
 
   state.settings = await window.api.getSettings();
   $('#btn-settings').innerHTML = svg('settings');
@@ -480,6 +551,7 @@ async function init() {
   // Settings dialog
   document.querySelectorAll('#dlg-settings .tab').forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
   $('#s-add-login').onclick = () => $('#s-logins').append(loginRow());
+  $('#s-ext-folder').onclick = () => window.api.openExtensionFolder();
   $('#s-browse').onclick = async () => {
     const dir = await window.api.chooseDir($('#s-dir').value);
     if (dir) $('#s-dir').value = dir;
@@ -493,8 +565,15 @@ async function init() {
   });
   setupDragDrop();
 
+  // Closing the add dialog without starting: forget the browser request (and its cookies).
+  $('#dlg-add').addEventListener('close', () => {
+    if (add.requestId && !add.submitted) window.api.discardRequest(add.requestId);
+    add.requestId = null;
+  });
+
   ready = true;
-  if (pendingLink !== null) openAddDialog(pendingLink);
+  if (pendingLink !== null) openAddDialog(pendingLink.url, pendingLink.ctx);
+  pendingPair.forEach(showPairRequest);
   window.api.onDownloads((list) => {
     state.list = list;
     render();

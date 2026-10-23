@@ -10,6 +10,7 @@ const size = fs.statSync(file).size;
 // Paths like /fail-503-3/x.bin answer HTTP 503 to the first 3 requests, then work.
 // /fail-404-0/x.bin is never found. Used to test automatic retry.
 const failures = new Map();
+const stats = { denied: 0, allowed: 0 }; // requests to /site/protected/*
 
 http
   .createServer((req, res) => {
@@ -32,6 +33,45 @@ http
       res.writeHead(403);
       return res.end();
     }
+
+    // ----- a small "website" for the browser-extension test -----
+    // /site/login sets a session cookie; /site/protected/* needs that cookie AND a Referer
+    // from /site/; /site/page.html has download links and a video.
+    const host = `http://${req.headers.host}`;
+    if (req.url === '/site/login') {
+      res.writeHead(302, { 'Set-Cookie': 'sid=abc123; HttpOnly; Path=/', Location: '/site/page.html' });
+      return res.end();
+    }
+    if (req.url === '/site/page.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(`<!doctype html><title>Test site</title><body style="font:16px sans-serif;padding:20px">
+        <p><a id="dl" href="/site/protected/archive.zip">archive.zip (40 MB, login needed)</a></p>
+        <p><a id="small" href="/site/files/readme.txt">readme.txt (small)</a></p>
+        <video id="v" src="/site/media/clip.mp4" preload="auto" muted autoplay width="320"></video></body>`);
+    }
+    if (req.url === '/site/files/readme.txt') {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Disposition': 'attachment; filename="readme.txt"' });
+      return res.end('hello from the test site\n');
+    }
+    if (req.url === '/__stats') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(stats));
+    }
+    if (req.url.startsWith('/site/protected/')) {
+      const okCookie = /(?:^|;\s*)sid=abc123(?:;|$)/.test(req.headers.cookie || '');
+      const okReferer = String(req.headers.referer || '').startsWith(`${host}/site/`);
+      if (!okCookie || !okReferer) {
+        stats.denied++;
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        return res.end(`forbidden (cookie:${okCookie} referer:${okReferer})`);
+      }
+      stats.allowed++;
+    }
+    const name = req.url.split('?')[0].split('/').pop();
+    const type = /\.mp4$/.test(name) ? 'video/mp4' : /\.zip$/.test(name) ? 'application/zip' : 'application/octet-stream';
+    const extra = { 'Content-Type': type };
+    if (req.url.startsWith('/site/protected/')) extra['Content-Disposition'] = `attachment; filename="${name}"`;
+
     let start = 0;
     let end = size - 1;
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
@@ -42,10 +82,10 @@ http
         'Content-Range': `bytes ${start}-${end}/${size}`,
         'Content-Length': end - start + 1,
         'Accept-Ranges': 'bytes',
-        'Content-Type': 'application/octet-stream',
+        ...extra,
       });
     } else {
-      res.writeHead(200, { 'Content-Length': size, 'Accept-Ranges': 'bytes' });
+      res.writeHead(200, { 'Content-Length': size, 'Accept-Ranges': 'bytes', ...extra });
     }
     if (req.method === 'HEAD') return res.end();
 

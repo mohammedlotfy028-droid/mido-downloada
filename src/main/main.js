@@ -5,8 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const { Aria2 } = require('./aria2');
 const { DownloadManager } = require('./downloads');
-const { Settings } = require('./settings');
+const { Settings, encrypt, decrypt } = require('./settings');
 const { probe } = require('./probe');
+const { BrowserBridge, PORT: BRIDGE_PORT } = require('./browser-bridge');
+const crypto = require('crypto');
 const { AppTray } = require('./tray');
 const { ClipboardWatcher } = require('./clipboard-watch');
 const { beforeAppClose } = require('./quit-behavior');
@@ -31,6 +33,21 @@ let watcher = null;
 let pollTimer = null;
 let quitting = false;
 let lastList = [];
+let bridge = null;
+
+// Links sent by the browser extension wait here (with their cookies) until the user
+// confirms them in the dialog. The UI only ever sees the request id, never the cookies.
+const browserRequests = new Map(); // id -> { url, headers, userAgent, filename, fileSize, mime, at }
+const pairWaiters = new Map(); // id -> resolve(boolean)
+
+// A header value must stay on one line, or it could smuggle in extra headers.
+const oneLine = (s) => String(s || '').replace(/[\r\n\0]+/g, ' ').trim();
+
+function takeBrowserRequest(id, { keep = false } = {}) {
+  const r = id ? browserRequests.get(id) : null;
+  if (r && !keep) browserRequests.delete(id);
+  return r || null;
+}
 
 function aria2Binary() {
   // Packaged app: resources/aria2/aria2c.exe next to app.asar. Dev: <repo>/resources/aria2.
@@ -49,9 +66,9 @@ function showWindow() {
 }
 
 /** Opens the "new download" dialog in the UI, optionally with a link filled in. */
-function openAddDialog(url = '') {
+function openAddDialog(url = '', ctx = null) {
   showWindow();
-  const send = () => win.webContents.send('ui:add', url);
+  const send = () => win.webContents.send('ui:add', url, ctx);
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
   else send();
 }
@@ -142,6 +159,60 @@ async function applySettings(changedKeys) {
   if (keys.has('lang') && tray) tray.buildMenu();
 }
 
+async function probeLink(url, browserReq = null) {
+  const info = await probe(url, {
+    userAgent: (browserReq && browserReq.userAgent) || settings.aria2Options()['user-agent'],
+    login: settings.loginFor(url),
+    extraHeaders: browserReq ? browserReq.headers : [],
+  });
+  // The browser often knows the real file name (Content-Disposition) better.
+  if (browserReq && browserReq.filename && (!info.ok || !/\.[a-z0-9]{1,9}$/i.test(info.name))) {
+    info.name = browserReq.filename;
+  }
+  const category = categoryOf(info.name, info.type || (browserReq && browserReq.mime));
+  return { ...info, category, dir: suggestDir(category) };
+}
+
+/** A link arrived from the browser extension. */
+async function onBrowserDownload(req) {
+  const headers = [];
+  const cookies = oneLine(req.cookies);
+  if (cookies) headers.push(`Cookie: ${cookies}`);
+  if (req.referrer) headers.push(`Referer: ${oneLine(req.referrer)}`);
+  const entry = {
+    url: req.url, headers, userAgent: oneLine(req.userAgent),
+    filename: require('./probe').safeFileName(req.filename || ''), fileSize: req.fileSize, mime: req.mime, at: Date.now(),
+  };
+  // Forget requests the user never answered after 30 minutes.
+  for (const [id, r] of browserRequests) if (Date.now() - r.at > 30 * 60000) browserRequests.delete(id);
+
+  if (settings.values.browserAsk) {
+    const id = crypto.randomBytes(8).toString('hex');
+    browserRequests.set(id, entry);
+    openAddDialog(req.url, { requestId: id, name: entry.filename, size: entry.fileSize, source: req.source });
+    return;
+  }
+  // Start right away, no dialog.
+  const info = await probeLink(req.url, entry);
+  await dm.add({
+    url: req.url, dir: info.dir, out: info.ok ? info.name : entry.filename, split: settings.values.split,
+    category: info.category, headers, userAgent: entry.userAgent,
+  });
+  poll();
+}
+
+/** The extension asks to be paired: ask the user in the app window. */
+function onPairRequest(name) {
+  return new Promise((resolve) => {
+    const id = crypto.randomBytes(8).toString('hex');
+    pairWaiters.set(id, resolve);
+    showWindow();
+    const send = () => win.webContents.send('ui:pair', { id, name });
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
+    else send();
+  });
+}
+
 function suggestDir(category) {
   const base = settings.values.downloadDir;
   if (!settings.values.categorize || !category) return base;
@@ -171,17 +242,29 @@ function registerIpc() {
   });
 
   // Looks at a link before downloading (name, size, type) and suggests a folder.
-  handle('dl:probe', async (url) => {
-    const info = await probe(url, {
-      userAgent: settings.aria2Options()['user-agent'],
-      login: settings.loginFor(url),
-    });
-    const category = categoryOf(info.name, info.type);
-    return { ...info, category, dir: suggestDir(category) };
-  });
+  handle('dl:probe', async (url, requestId) => probeLink(url, takeBrowserRequest(requestId, { keep: true })));
   handle('dl:suggestDir', (category) => suggestDir(category));
 
-  handle('dl:add', (opts) => dm.add(opts));
+  handle('dl:add', (opts) => {
+    // Links from the browser carry cookies/Referer that stay in the main process.
+    const req = takeBrowserRequest(opts.requestId);
+    const { requestId, ...rest } = opts;
+    return dm.add({ ...rest, headers: req ? req.headers : [], userAgent: req ? req.userAgent : '' });
+  });
+  handle('dl:discardRequest', (requestId) => takeBrowserRequest(requestId));
+  handle('ui:pairAnswer', (id, approved) => {
+    const resolve = pairWaiters.get(id);
+    pairWaiters.delete(id);
+    if (resolve) resolve(!!approved);
+  });
+  handle('bridge:status', () => ({ port: bridge ? bridge.port : BRIDGE_PORT, error: bridge ? bridge.error : '' }));
+  handle('bridge:openExtensionFolder', () => {
+    // Installed app: resources/extension. From source: <repo>/extension.
+    const dir = app.isPackaged
+      ? path.join(process.resourcesPath, 'extension')
+      : path.join(__dirname, '..', '..', 'extension');
+    return shell.openPath(dir);
+  });
   handle('dl:pause', (gid) => dm.pause(gid));
   handle('dl:resume', (gid) => dm.resume(gid));
   handle('dl:cancel', (gid) => dm.cancel(gid));
@@ -260,6 +343,7 @@ app.whenReady().then(async () => {
         return { 'http-user': login.user, 'http-passwd': login.pass, 'ftp-user': login.user, 'ftp-passwd': login.pass };
       },
       retrySettings: () => settings.values,
+      secrets: { encrypt, decrypt }, // cookies from the browser are stored encrypted
     });
     dm.on('complete', (item) =>
       notify(tr().done, item.name, () => {
@@ -270,6 +354,15 @@ app.whenReady().then(async () => {
     await dm.restoreAfterStart();
     pollTimer = setInterval(poll, 1000);
     poll();
+
+    bridge = new BrowserBridge({
+      settings,
+      version: app.getVersion(),
+      port: Number(process.env.MIDO_BRIDGE_PORT) || BRIDGE_PORT,
+      onPairRequest,
+      onDownload: onBrowserDownload,
+    });
+    bridge.start();
   } catch (e) {
     dialog.showErrorBox('Mido Downloada', `Could not start the download engine (aria2):\n${e.message}`);
     quitting = true;
@@ -300,6 +393,7 @@ app.on('before-quit', async (e) => {
   quitting = 'stopping';
   clearInterval(pollTimer);
   if (watcher) watcher.stop();
+  if (bridge) bridge.stop();
   try {
     if (dm) {
       await beforeAppClose(dm, dm.list().filter((d) => d.status === 'active' || d.status === 'waiting'));

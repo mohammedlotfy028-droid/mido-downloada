@@ -1,7 +1,7 @@
 {
   "name": "mido-downloada",
   "productName": "Mido Downloada",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open-source download manager powered by aria2",
   "main": "src/main/main.js",
   "author": "Mohammed Lotfy",
@@ -24,6 +24,10 @@
       {
         "from": "resources/aria2",
         "to": "aria2"
+      },
+      {
+        "from": "extension",
+        "to": "extension"
       }
     ],
     "win": {
