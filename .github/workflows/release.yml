@@ -39,17 +39,31 @@ jobs:
       - name: Engine test
         run: node test/engine-test.js
 
-      - name: Build installer and publish release
-        run: npm run dist:publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # electron-builder's own GitHub publisher sometimes "succeeds" without uploading every
+      # file (v0.4.0 lacked the blockmap, v0.6.1 lacked the installer), so we only build with it
+      # and upload + verify the files ourselves.
+      - name: Build installer
+        run: npm run dist:ci
 
       - name: Zip the browser extension
         shell: pwsh
         run: Compress-Archive -Path extension\* -DestinationPath "dist\mido-download-extension-${{ github.ref_name }}.zip"
 
-      - name: Attach the extension to the release
+      - name: Publish the release and check every file arrived
         shell: bash
-        run: gh release upload "${GITHUB_REF_NAME}" dist/mido-download-extension-*.zip --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          v="${GITHUB_REF_NAME#v}"
+          files=("dist/Mido-Download-Setup-$v.exe" "dist/Mido-Download-Setup-$v.exe.blockmap" "dist/latest.yml" "dist/mido-download-extension-${GITHUB_REF_NAME}.zip")
+          for f in "${files[@]}"; do [ -s "$f" ] || { echo "missing build output: $f"; exit 1; }; done
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Mido Download $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          # Verify: every file must now be an asset of the release, with the right size.
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[] | "\(.name) \(.size)"' | sort > uploaded.txt
+          cat uploaded.txt
+          for f in "${files[@]}"; do
+            name=$(basename "$f"); size=$(stat -c %s "$f")
+            grep -qx "$name $size" uploaded.txt || { echo "not uploaded correctly: $name ($size bytes)"; exit 1; }
+          done

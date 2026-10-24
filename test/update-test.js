@@ -18,7 +18,7 @@ const pkg = require('../package.json');
 const [maj, min, patch] = pkg.version.split('.').map(Number);
 const NEXT = `${maj}.${min}.${patch + 1}`;
 const exe = path.join(ROOT, 'dist', 'win-unpacked', 'Mido Download.exe');
-const installer = path.join(ROOT, 'dist', `Mido Download Setup ${pkg.version}.exe`);
+const installer = path.join(ROOT, 'dist', `Mido-Download-Setup-${pkg.version}.exe`);
 const updaterCache = path.join(process.env.LOCALAPPDATA, 'mido-downloada-updater');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mido-upd-'));
