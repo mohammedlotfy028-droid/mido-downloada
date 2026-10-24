@@ -1,19 +1,56 @@
 {
-  "extName": { "message": "Mido Download" },
-  "extDescription": { "message": "Send downloads, links and videos from your browser to Mido Download." },
-  "menuDownload": { "message": "Download with Mido Download" },
-  "statusChecking": { "message": "Checking the app…" },
-  "statusConnected": { "message": "Connected to Mido Download" },
-  "statusNotRunning": { "message": "Mido Download isn't running. Start the app to send downloads to it." },
-  "statusDisabled": { "message": "Browser downloads are turned off in the app settings." },
-  "statusNotPaired": { "message": "Not connected yet. Click Connect, then allow it in the app." },
-  "statusPairing": { "message": "Waiting for you to allow it in the app…" },
-  "statusDenied": { "message": "The connection was not allowed." },
-  "connect": { "message": "Connect" },
-  "captureToggle": { "message": "Catch downloads from the browser" },
-  "mediaTitle": { "message": "Videos & audio on this page" },
-  "mediaEmpty": { "message": "Nothing found yet. Play the video, then open this again." },
-  "download": { "message": "Download" },
-  "sent": { "message": "Sent ✓" },
-  "sendFailed": { "message": "Couldn't send" }
+  "extName": {
+    "message": "Mido Download"
+  },
+  "extDescription": {
+    "message": "Send downloads, links and videos from your browser to Mido Download."
+  },
+  "menuDownload": {
+    "message": "Download with Mido Download"
+  },
+  "statusChecking": {
+    "message": "Checking the app…"
+  },
+  "statusConnected": {
+    "message": "Connected to Mido Download"
+  },
+  "statusNotRunning": {
+    "message": "Mido Download isn't running. Start the app to send downloads to it."
+  },
+  "statusDisabled": {
+    "message": "Browser downloads are turned off in the app settings."
+  },
+  "statusNotPaired": {
+    "message": "Not connected yet. Click Connect, then allow it in the app."
+  },
+  "statusPairing": {
+    "message": "Waiting for you to allow it in the app…"
+  },
+  "statusDenied": {
+    "message": "The connection was not allowed."
+  },
+  "connect": {
+    "message": "Connect"
+  },
+  "captureToggle": {
+    "message": "Catch downloads from the browser"
+  },
+  "mediaTitle": {
+    "message": "Videos & audio on this page"
+  },
+  "mediaEmpty": {
+    "message": "Nothing found yet. Play the video, then open this again."
+  },
+  "download": {
+    "message": "Download"
+  },
+  "sent": {
+    "message": "Sent ✓"
+  },
+  "sendFailed": {
+    "message": "Couldn't send"
+  },
+  "downloadThisVideo": {
+    "message": "Download this video"
+  }
 }

@@ -49,6 +49,7 @@ function categoryOf(fileName, mimeType = '') {
 /** True if a URL looks like a direct link to a file (used by the clipboard watcher). */
 function looksLikeFileUrl(url) {
   if (/^magnet:\?xt=urn:btih:[a-z0-9]{32,40}/i.test(url)) return true; // torrent magnet link
+  if (require('./media-sites').mediaSiteOf(url)) return true; // YouTube / Facebook / Instagram video
   try {
     const u = new URL(url);
     if (!['http:', 'https:', 'ftp:'].includes(u.protocol)) return false;

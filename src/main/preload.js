@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('api', {
   chooseDir: (current) => ipcRenderer.invoke('dialog:chooseDir', current),
 
   probe: (url, requestId) => ipcRenderer.invoke('dl:probe', url, requestId),
+  mediaInfo: (url, requestId) => ipcRenderer.invoke('dl:mediaInfo', url, requestId),
+  mediaToolsStatus: () => ipcRenderer.invoke('media:toolsStatus'),
+  updateMediaTools: () => ipcRenderer.invoke('media:updateTools'),
   discardRequest: (requestId) => ipcRenderer.invoke('dl:discardRequest', requestId),
   answerPair: (id, approved) => ipcRenderer.invoke('ui:pairAnswer', id, approved),
   bridgeStatus: () => ipcRenderer.invoke('bridge:status'),

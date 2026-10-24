@@ -17,6 +17,9 @@ const { AppTray } = require('./tray');
 const { ClipboardWatcher } = require('./clipboard-watch');
 const { beforeAppClose } = require('./quit-behavior');
 const { CATEGORIES, categoryOf } = require('../shared/categories');
+const { MediaManager } = require('./media');
+const { MediaTools } = require('./media-tools');
+const { mediaSiteOf } = require('../shared/media-sites');
 
 // Dev/test: run with a separate data folder so tests don't touch real data.
 if (process.env.MIDO_DATA_DIR) app.setPath('userData', path.resolve(process.env.MIDO_DATA_DIR));
@@ -80,6 +83,17 @@ let lastList = [];
 let bridge = null;
 let scheduler = null;
 let updater = null;
+let media = null; // MediaManager (yt-dlp)
+let mediaTools = null;
+// The first start copies yt-dlp to the data folder (a few seconds): requests wait for it.
+let markMediaReady;
+const mediaReady = new Promise((r) => (markMediaReady = r));
+const waitForMedia = () => Promise.race([mediaReady, new Promise((r) => setTimeout(r, 60000))]);
+
+/** Folder with aria2/, yt-dlp/, ffmpeg/: next to app.asar when installed, <repo>/resources from source. */
+function resourcesDir() {
+  return app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', '..', 'resources');
+}
 
 // ---------- "when all downloads finish" ----------
 let wasBusy = false;
@@ -230,7 +244,8 @@ async function poll() {
     // Save unfinished downloads every 5s so a crash loses almost nothing
     // (aria2's own periodic save is off because it writes passwords in plain text).
     if (++pollCount % 5 === 0) await aria2.saveSession();
-    lastList = await dm.refresh();
+    // aria2 downloads + video-site downloads (yt-dlp) in one list, newest first.
+    lastList = [...(await dm.refresh()), ...(media ? media.list() : [])].sort((a, b) => b.addedAt - a.addedAt);
     checkAfterDone(lastList);
     if (tray) tray.update(lastList);
     if (win && !win.isDestroyed()) win.webContents.send('downloads', lastList);
@@ -272,6 +287,11 @@ function loadTorrent(file) {
 }
 
 async function probeLink(url, browserReq = null) {
+  const site = mediaSiteOf(url);
+  if (site) {
+    // A video site: yt-dlp looks at it (dl:mediaInfo), which is slower; tell the UI first.
+    return { ok: true, media: true, site, name: '', size: 0, type: '', resumable: true, category: 'video', dir: suggestDir('video') };
+  }
   if (/^magnet:/i.test(url)) {
     // Nothing to check over HTTP; the name/size arrive from other peers later.
     return { ok: true, magnet: true, name: '', size: 0, type: '', resumable: true, category: null, dir: settings.values.downloadDir };
@@ -296,7 +316,8 @@ async function onBrowserDownload(req) {
   if (cookies) headers.push(`Cookie: ${cookies}`);
   if (req.referrer) headers.push(`Referer: ${oneLine(req.referrer)}`);
   const entry = {
-    url: req.url, headers, userAgent: oneLine(req.userAgent),
+    url: req.url, headers, userAgent: oneLine(req.userAgent), referrer: req.referrer || '',
+    cookieList: req.cookieList || [], // for video sites (yt-dlp needs each cookie's domain)
     filename: require('./probe').safeFileName(req.filename || ''), fileSize: req.fileSize, mime: req.mime, at: Date.now(),
   };
   // Forget requests the user never answered after 30 minutes.
@@ -308,6 +329,19 @@ async function onBrowserDownload(req) {
     openAddDialog(req.url, { requestId: id, name: entry.filename, size: entry.fileSize, source: req.source });
     return;
   }
+  if (mediaSiteOf(req.url)) await waitForMedia();
+  if (mediaSiteOf(req.url) && media) {
+    // Start right away in the default quality.
+    const info = await media.info(req.url, mediaSecret(entry));
+    if (!info.ok) return notify(tr().failed, `${req.url}\n${info.error}`, showWindow);
+    const quality = qualityFromSetting(settings.values.mediaQuality);
+    media.add({
+      url: req.url, quality, title: info.title, dir: suggestDir(quality.type === 'audio' ? 'music' : 'video'),
+      category: quality.type === 'audio' ? 'music' : 'video', secret: mediaSecret(entry),
+    });
+    poll();
+    return;
+  }
   // Start right away, no dialog.
   const info = await probeLink(req.url, entry);
   await dm.add({
@@ -315,6 +349,22 @@ async function onBrowserDownload(req) {
     category: info.category, headers, userAgent: entry.userAgent,
   });
   poll();
+}
+
+const isMediaGid = (gid) => /^m/.test(String(gid));
+const engineOf = (gid) => (isMediaGid(gid) ? media : dm);
+const itemOf = (gid) => (isMediaGid(gid) ? media && media.items[gid] : dm.items[gid]);
+
+/** What yt-dlp gets from a browser request (stored encrypted with the item). */
+function mediaSecret(req) {
+  if (!req) return null;
+  return { cookieList: req.cookieList || [], userAgent: req.userAgent || '', referrer: req.referrer || '' };
+}
+
+/** "1080" / "best" / "mp3" / "m4a" -> quality object for MediaManager */
+function qualityFromSetting(v) {
+  if (v === 'mp3' || v === 'm4a') return { type: 'audio', format: v };
+  return { type: 'video', height: v === 'best' ? 0 : Number(v) || 1080 };
 }
 
 /** The extension asks to be paired: ask the user in the app window. */
@@ -361,9 +411,27 @@ function registerIpc() {
   handle('dl:probe', async (url, requestId) => probeLink(url, takeBrowserRequest(requestId, { keep: true })));
   handle('dl:suggestDir', (category) => suggestDir(category));
 
-  handle('dl:add', (opts) => {
+  // A video site link: ask yt-dlp for the title and the available qualities.
+  handle('dl:mediaInfo', async (url, requestId) => {
+    await waitForMedia();
+    if (!media || !mediaTools.available()) return { ok: false, error: 'NO_TOOLS' };
+    return media.info(url, mediaSecret(takeBrowserRequest(requestId, { keep: true })));
+  });
+
+  handle('dl:add', async (opts) => {
     // Links from the browser carry cookies/Referer that stay in the main process.
     const req = takeBrowserRequest(opts.requestId);
+    if (opts.mediaQuality) {
+      await waitForMedia();
+      if (!media) throw new Error('NO_TOOLS');
+      const q = opts.mediaQuality;
+      return media.add({
+        url: opts.url, dir: opts.dir, title: opts.title || '', size: opts.size || 0,
+        quality: q.type === 'audio' ? { type: 'audio', format: q.format === 'm4a' ? 'm4a' : 'mp3' } : { type: 'video', height: Number(q.height) || 0 },
+        category: q.type === 'audio' ? 'music' : 'video', speedLimit: opts.speedLimit || 0,
+        secret: mediaSecret(req),
+      });
+    }
     const { requestId, checksum, torrentId, ...rest } = opts;
     const parsed = parseChecksum(checksum); // throws BAD_CHECKSUM
     const torrentFile = torrentId ? loadedTorrents.get(torrentId) : '';
@@ -390,7 +458,7 @@ function registerIpc() {
 
   // Hash of a finished file, to compare with the one the website shows.
   handle('dl:hash', async (gid, algo) => {
-    const item = dm.items[gid];
+    const item = itemOf(gid);
     if (!item || !item.path || !fs.existsSync(item.path) || fs.statSync(item.path).isDirectory()) return null;
     return hashFile(item.path, algo);
   });
@@ -402,6 +470,13 @@ function registerIpc() {
     }
   });
   handle('dl:discardRequest', (requestId) => takeBrowserRequest(requestId));
+  // yt-dlp version + "update now" in Settings
+  ipcMain.handle('media:toolsStatus', () => (mediaTools ? { ...mediaTools.status, available: mediaTools.available() } : { available: false }));
+  ipcMain.handle('media:updateTools', async () => {
+    if (!mediaTools) return null;
+    const result = await mediaTools.update(() => media && media.procs.size > 0);
+    return { ...mediaTools.status, result, available: mediaTools.available() };
+  });
   handle('ui:pairAnswer', (id, approved) => {
     const resolve = pairWaiters.get(id);
     pairWaiters.delete(id);
@@ -415,24 +490,25 @@ function registerIpc() {
       : path.join(__dirname, '..', '..', 'extension');
     return shell.openPath(dir);
   });
-  handle('dl:pause', (gid) => dm.pause(gid));
-  handle('dl:resume', (gid) => dm.resume(gid));
-  handle('dl:cancel', (gid) => dm.cancel(gid));
+  // Video-site downloads have gids starting with "m" (yt-dlp); the rest belong to aria2.
+  handle('dl:pause', (gid) => engineOf(gid).pause(gid));
+  handle('dl:resume', (gid) => engineOf(gid).resume(gid));
+  handle('dl:cancel', (gid) => engineOf(gid).cancel(gid));
   handle('dl:remove', async (gid, deleteFiles) => {
-    const files = await dm.remove(gid);
+    const files = await engineOf(gid).remove(gid);
     // Files go to the Recycle Bin, not permanently deleted.
     if (deleteFiles) for (const f of files) await shell.trashItem(f).catch(() => {});
   });
-  handle('dl:setLimit', (gid, kb) => dm.setSpeedLimit(gid, kb));
-  handle('dl:move', (gid, how) => dm.move(gid, how));
-  handle('dl:pauseAll', () => dm.pauseAll());
-  handle('dl:resumeAll', () => dm.resumeAll());
+  handle('dl:setLimit', (gid, kb) => engineOf(gid).setSpeedLimit(gid, kb));
+  handle('dl:move', (gid, how) => (isMediaGid(gid) ? null : dm.move(gid, how)));
+  handle('dl:pauseAll', () => Promise.all([dm.pauseAll(), media && media.pauseAll()]));
+  handle('dl:resumeAll', () => Promise.all([dm.resumeAll(), media && media.resumeAll()]));
   handle('dl:openFile', async (gid) => {
-    const item = dm.items[gid];
+    const item = itemOf(gid);
     if (item && item.path) return shell.openPath(item.path);
   });
   handle('dl:openFolder', (gid) => {
-    const item = dm.items[gid];
+    const item = itemOf(gid);
     if (!item) return;
     if (item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
     else shell.openPath(item.dir);
@@ -486,8 +562,8 @@ app.whenReady().then(async () => {
     actions: {
       show: showWindow,
       add: () => openAddDialog(),
-      pauseAll: () => dm && dm.pauseAll().then(poll),
-      resumeAll: () => dm && dm.resumeAll().then(poll),
+      pauseAll: () => dm && Promise.all([dm.pauseAll(), media && media.pauseAll()]).then(poll),
+      resumeAll: () => dm && Promise.all([dm.resumeAll(), media && media.resumeAll()]).then(poll),
       quit: () => app.quit(),
     },
   });
@@ -517,6 +593,31 @@ app.whenReady().then(async () => {
     );
     dm.on('failed', (item) => notify(tr().failed, `${item.name}\n${item.errorMessage || ''}`, showWindow));
     await dm.restoreAfterStart();
+
+    // Video sites (YouTube, Facebook, Instagram…) through yt-dlp + ffmpeg.
+    mediaTools = new MediaTools({ resourcesDir: resourcesDir(), dataDir });
+    await mediaTools.prepare().catch((e) => console.error('[yt-dlp] prepare failed:', e.message));
+    media = new MediaManager({
+      dataDir,
+      tools: () => mediaTools.paths(),
+      settings: () => settings.values,
+      secrets: { encrypt, decrypt },
+    });
+    media.on('complete', (item) =>
+      notify(tr().done, item.name, () => {
+        if (item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
+      })
+    );
+    media.on('failed', (item) => notify(tr().failed, `${item.name}\n${item.errorMessage || ''}`, showWindow));
+    media.schedule(); // continue videos that were downloading when the app closed
+    markMediaReady();
+    // Keep yt-dlp fresh (sites change often): check a minute after start, then twice a day.
+    if (process.env.MIDO_TEST !== '1') {
+      const updateTools = () => mediaTools.updateIfDue(() => media.procs.size > 0).catch(() => {});
+      setTimeout(updateTools, 60000);
+      setInterval(updateTools, 12 * 60 * 60 * 1000);
+    }
+
     pollTimer = setInterval(poll, 1000);
     poll();
 
@@ -533,12 +634,12 @@ app.whenReady().then(async () => {
       settings: () => settings.values,
       startAll: async () => {
         console.log('[schedule] start time: resuming downloads');
-        await dm.resumeAll();
+        await Promise.all([dm.resumeAll(), media.resumeAll()]);
         poll();
       },
       stopAll: async () => {
         console.log('[schedule] stop time: pausing downloads');
-        await dm.pauseAll();
+        await Promise.all([dm.pauseAll(), media.pauseAll()]);
         poll();
       },
     });
@@ -583,6 +684,7 @@ app.on('before-quit', async (e) => {
       await beforeAppClose(dm, dm.list().filter((d) => d.status === 'active' || d.status === 'waiting'));
       await dm.refresh();
     }
+    if (media) await media.stopAll(); // stops yt-dlp; those videos continue next time
     if (aria2) await aria2.stop();
   } catch (err) {
     console.error('shutdown error:', err.message);

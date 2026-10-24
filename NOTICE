@@ -9,3 +9,19 @@ linked into or modified by Mido Download.
   Licensed under the GNU General Public License, version 2 or later.
   The full license text is included as resources/aria2/COPYING.
   Source code: https://github.com/aria2/aria2/releases/tag/release-1.37.0
+
+It also bundles two separate programs for video sites (YouTube, Facebook, Instagram…),
+run as external executables (their code is not linked into Mido Download):
+
+  yt-dlp — https://github.com/yt-dlp/yt-dlp
+  Released into the public domain under the Unlicense. The app keeps it updated from the
+  official GitHub releases (checked against the published SHA-256 sums).
+
+  FFmpeg 8.1 (LGPL "shared" build by BtbN, https://github.com/BtbN/FFmpeg-Builds)
+  Licensed under the GNU Lesser General Public License, version 2.1 or later.
+  The license text is included as resources/ffmpeg/LICENSE.txt.
+  Source code: https://ffmpeg.org/download.html (release 8.1) and the build scripts at
+  https://github.com/BtbN/FFmpeg-Builds
+
+Downloading from video sites may be restricted by their terms of service and by copyright.
+Only download videos you are allowed to (for example your own, or openly licensed ones).

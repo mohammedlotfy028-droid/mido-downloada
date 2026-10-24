@@ -28,6 +28,8 @@ function defaults(downloadsDir) {
     schedule: { enabled: false, start: '02:00', stop: '08:00', days: [0, 1, 2, 3, 4, 5, 6] },
     afterDone: 'nothing', // when everything finished: 'nothing' | 'quit' | 'sleep' | 'shutdown'
     autoUpdate: true,
+    // YouTube/Facebook/Instagram: preselected quality ('best', '2160', '1080', '720', '480', 'mp3', 'm4a')
+    mediaQuality: '1080',
   };
 }
 

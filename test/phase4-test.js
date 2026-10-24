@@ -145,9 +145,9 @@ const dialogReady = () =>
   }
   await sleep(1500);
   await app.evaluate('window.api.pauseAll()');
-  await sleep(1000);
   const night = async () => (await items(app)).filter((d) => /^night/.test(d.name)).map((d) => d.status).join(',');
-  check((await night()) === 'paused,paused', 'two downloads paused before the schedule');
+  await waitFor(async () => (await night()) === 'paused,paused', 10000, 500);
+  check((await night()) === 'paused,paused', `two downloads paused before the schedule (${await night()})`);
   await app.evaluate(`window.api.setSettings({ schedule: { enabled: true, start: '10:00', stop: '11:00', days: [0,1,2,3,4,5,6] } })`);
   let inside = await app.evaluate(`window.api.testScheduleTick('2026-10-26T10:30:00', true)`);
   await sleep(1500);

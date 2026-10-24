@@ -118,16 +118,33 @@ class BrowserBridge {
         filename: typeof body.filename === 'string' ? body.filename : '',
         referrer: isHttpUrl(body.referrer) ? body.referrer : '',
         cookies: typeof body.cookies === 'string' ? body.cookies : '',
+        cookieList: cleanCookieList(body.cookieList),
         userAgent: typeof body.userAgent === 'string' ? body.userAgent.slice(0, 512) : '',
         fileSize: Number(body.fileSize) || 0,
         mime: typeof body.mime === 'string' ? body.mime : '',
-        source: ['click', 'menu', 'media'].includes(body.source) ? body.source : 'click',
+        source: ['click', 'menu', 'media', 'page'].includes(body.source) ? body.source : 'click',
       });
       return this.reply(res, 200, { ok: true });
     }
 
     return this.reply(res, 404, { error: 'not found' });
   }
+}
+
+/** Cookies with their domains (for video sites / yt-dlp). Only plain fields, bounded size. */
+function cleanCookieList(list) {
+  if (!Array.isArray(list)) return [];
+  const str = (v, max) => String(v ?? '').replace(/[\t\r\n\0]/g, '').slice(0, max);
+  return list.slice(0, 300).map((c) => ({
+    name: str(c.name, 256),
+    value: str(c.value, 8192),
+    domain: str(c.domain, 256),
+    path: str(c.path || '/', 512),
+    secure: !!c.secure,
+    httpOnly: !!c.httpOnly,
+    hostOnly: !!c.hostOnly,
+    expirationDate: Number(c.expirationDate) || 0,
+  })).filter((c) => c.name && c.domain);
 }
 
 function isHttpUrl(s) {

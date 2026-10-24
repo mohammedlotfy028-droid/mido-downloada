@@ -16,12 +16,19 @@
   </section>
   <button id="btn-connect" class="btn primary" data-msg="connect" hidden></button>
 
+  <!-- On a YouTube / Facebook / Instagram … video page -->
+  <section class="page-video" id="page-video" hidden>
+    <div class="pv-site" id="pv-site"></div>
+    <div class="pv-title" id="pv-title" dir="auto"></div>
+    <button id="btn-page" class="btn primary" data-msg="downloadThisVideo"></button>
+  </section>
+
   <label class="toggle">
     <input type="checkbox" id="capture" />
     <span data-msg="captureToggle"></span>
   </label>
 
-  <h2 data-msg="mediaTitle"></h2>
+  <h2 id="media-heading" data-msg="mediaTitle"></h2>
   <ul id="media"></ul>
   <p class="empty" id="media-empty" data-msg="mediaEmpty" hidden></p>
 

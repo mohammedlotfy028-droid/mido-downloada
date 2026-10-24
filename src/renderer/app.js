@@ -135,6 +135,14 @@ function updateRow(row, d) {
     sub = d.errorMessage || '';
   } else if (d.status === 'waiting' && d.queuePos) {
     sub = tr.queuePos(d.queuePos);
+  } else if (d.kind === 'media' && live) {
+    // yt-dlp: video and audio come separately, then get joined by ffmpeg.
+    const n = d.expectedStreams || 1;
+    const i = d.stageIndex || 1;
+    if (d.stage === 'merge' || d.stage === 'convert') sub = tr.mediaStage[d.stage];
+    else if (d.stage === 'starting' || !d.stageIndex) sub = tr.mediaStage.starting;
+    else if (n > 1) sub = i === 1 ? tr.mediaStage.video(i, n) : tr.mediaStage.audio(i, n);
+    else sub = tr.mediaStage.single;
   } else if (d.metadata) {
     sub = tr.metadata;
   } else if (live && (d.kind === 'torrent' || d.kind === 'magnet')) {
@@ -193,7 +201,7 @@ async function showRowMenu(gid) {
   if (isStopped(d)) items.push({ id: 'resume', label: a.resume });
   if (isRunning(d) || d.status === 'paused' || d.status === 'error') items.push({ id: 'cancel', label: a.cancel });
   if (d.status !== 'complete') items.push({ id: 'limit', label: a.limit });
-  if (d.status === 'waiting') {
+  if (d.status === 'waiting' && d.kind !== 'media') {
     items.push({ type: 'separator' }, { id: 'top', label: a.top }, { id: 'up', label: a.up }, { id: 'down', label: a.down });
   }
   items.push({ type: 'separator' });
@@ -205,10 +213,32 @@ async function showRowMenu(gid) {
   if (chosen) onAction(chosen, gid);
 }
 
+/**
+ * Calls cb(value) once when a dialog is answered: on its form's submit (value = the button
+ * that was clicked) or on close (Esc, or closed from code).
+ * Not just 'close': Chromium delays that event while the window is hidden, so an answer
+ * could be lost or arrive late; 'submit' always comes right away.
+ */
+function onDialogDone(dlg, cb) {
+  const form = dlg.querySelector('form');
+  let done = false;
+  const finish = (value) => {
+    if (done) return;
+    done = true;
+    if (form) form.removeEventListener('submit', onSubmit);
+    dlg.removeEventListener('close', onClose);
+    cb(value);
+  };
+  const onSubmit = (e) => finish(e.submitter ? e.submitter.value : '');
+  const onClose = () => finish(dlg.returnValue);
+  if (form) form.addEventListener('submit', onSubmit);
+  dlg.addEventListener('close', onClose);
+}
+
 function confirmDialog(dlg, onOk) {
   dlg.returnValue = '';
   dlg.showModal();
-  dlg.addEventListener('close', () => dlg.returnValue === 'ok' && onOk(), { once: true });
+  onDialogDone(dlg, (value) => value === 'ok' && onOk());
 }
 
 async function onAction(act, gid) {
@@ -308,11 +338,104 @@ function isValidUrl(s) {
   }
 }
 
+/** Shows/hides the video-site part of the add dialog (preview + quality instead of name/connections). */
+function setMediaMode(on) {
+  $('#media-box').hidden = !on || !add.media;
+  $('#lbl-quality').hidden = !on || !add.media;
+  $('#lbl-name').hidden = on;
+  $('#lbl-split').hidden = on;
+  $('#lbl-checksum').hidden = on || !!add.torrent;
+  if (!on) add.media = null;
+}
+
+function durationText(sec) {
+  if (!sec) return '';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** Fills the quality list from yt-dlp's info and preselects the default from Settings. */
+function fillQualities(info) {
+  const tr = t();
+  const sel = $('#in-quality');
+  sel.replaceChildren();
+  const opt = (value, label) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    sel.append(o);
+  };
+  for (const q of info.qualities) {
+    opt(`v:${q.height}`, q.height ? `${q.label}${q.size ? ` · ~${Format.bytes(q.size, tr)}` : ''}` : tr.qBest);
+  }
+  if (info.hasAudio) {
+    const a = info.audioSize ? ` · ~${Format.bytes(info.audioSize, tr)}` : '';
+    opt('a:mp3', tr.qMp3 + a);
+    opt('a:m4a', tr.qM4a + a);
+  }
+  // Default: the setting, or the highest quality not above it.
+  const want = state.settings.mediaQuality;
+  const values = [...sel.options].map((o) => o.value);
+  if (want === 'mp3' || want === 'm4a') sel.value = values.includes(`a:${want}`) ? `a:${want}` : values[0];
+  else if (want === 'best') sel.value = values[0];
+  else {
+    const h = Number(want);
+    const fit = info.qualities.find((q) => q.height && q.height <= h);
+    sel.value = fit ? `v:${fit.height}` : values[0];
+  }
+}
+
+async function loadMediaInfo(url, site, seq) {
+  const tr = t();
+  const info = $('#probe-info');
+  info.hidden = false;
+  info.className = 'probe loading';
+  info.textContent = tr.mediaLoading(site);
+  setMediaMode(true);
+  let r;
+  try {
+    r = await window.api.mediaInfo(url, add.requestId);
+  } catch (e) {
+    r = { ok: false, error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') };
+  }
+  if (seq !== add.probeSeq) return;
+  if (!r.ok) {
+    add.media = null;
+    setMediaMode(true);
+    info.className = 'probe warn';
+    const why = r.error === 'PLAYLIST' ? tr.mediaPlaylist : r.error === 'NO_TOOLS' ? tr.mediaNoTools : `${tr.mediaFail}: ${r.error}`;
+    info.textContent = add.requestId ? why : `${why}\n${tr.mediaLoginHint}`;
+    return;
+  }
+  add.media = r;
+  info.hidden = true;
+  $('#media-thumb').src = r.thumbnail || '';
+  $('#media-thumb').hidden = !r.thumbnail;
+  $('#media-title').textContent = r.title;
+  $('#media-sub').textContent = [site || r.site, r.uploader, durationText(r.duration)].filter(Boolean).join(' · ');
+  fillQualities(r);
+  setMediaMode(true);
+  await onQualityChange();
+}
+
+/** Audio goes to the Music folder, video to Video (unless the user picked a folder). */
+async function onQualityChange() {
+  if (add.dirTouched || !add.media) return;
+  const audio = $('#in-quality').value.startsWith('a:');
+  add.category = audio ? 'music' : 'video';
+  $('#in-dir').value = await window.api.suggestDir(add.category);
+}
+
 /** Switches the add dialog to "torrent file" mode. */
 function useTorrent(info) {
   const tr = t();
   add.torrent = info;
   add.category = null;
+  add.mediaLink = false;
+  add.probeSeq++; // ignore any link check still running
+  setMediaMode(false);
   $('#in-url').value = info.name;
   $('#in-url').readOnly = true;
   $('#in-name').value = '';
@@ -357,7 +480,8 @@ function openAddDialog(prefillUrl = '', ctx = null) {
     }
     return;
   }
-  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false, torrent: null });
+  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false, torrent: null, media: null, mediaLink: false });
+  setMediaMode(false);
   $('#add-from-browser').hidden = !add.requestId;
   $('#in-url').value = prefillUrl;
   $('#in-url').readOnly = false;
@@ -404,6 +528,12 @@ async function runProbe() {
   info.textContent = tr.probing;
   const r = await window.api.probe(url, add.requestId);
   if (seq !== add.probeSeq) return; // a newer link was typed meanwhile
+  add.mediaLink = !!r.media;
+  if (r.media) {
+    if (!add.dirTouched) $('#in-dir').value = r.dir;
+    return loadMediaInfo(url, r.site, seq);
+  }
+  setMediaMode(false);
   add.category = r.category;
   if (!add.nameTouched && r.ok) $('#in-name').value = r.name;
   if (!add.dirTouched) $('#in-dir').value = r.dir;
@@ -428,6 +558,24 @@ async function submitAdd(e) {
     return;
   }
   try {
+    if (add.media) {
+      // Video site: yt-dlp with the chosen quality.
+      const [kind, val] = $('#in-quality').value.split(':');
+      const q = add.media.qualities.find((x) => `v:${x.height}` === $('#in-quality').value);
+      await window.api.add({
+        url,
+        dir: $('#in-dir').value.trim(),
+        title: add.media.title,
+        size: kind === 'a' ? add.media.audioSize : q ? q.size : 0,
+        mediaQuality: kind === 'a' ? { type: 'audio', format: val } : { type: 'video', height: Number(val) },
+        speedLimit: Number($('#in-limit').value) || 0,
+        requestId: add.requestId,
+      });
+      add.submitted = true;
+      $('#dlg-add').close();
+      return;
+    }
+    if (add.mediaLink) return; // a video-site link whose info is still loading (or failed)
     await window.api.add({
       url,
       dir: $('#in-dir').value.trim(),
@@ -458,15 +606,11 @@ function showPairRequest(req) {
   $('#pair-name').textContent = req.name;
   dlg.returnValue = '';
   dlg.showModal();
-  dlg.addEventListener(
-    'close',
-    async () => {
-      await window.api.answerPair(req.id, dlg.returnValue === 'allow');
-      state.settings = await window.api.getSettings();
-      if (pairQueue.length) showPairRequest(pairQueue.shift());
-    },
-    { once: true }
-  );
+  onDialogDone(dlg, async (value) => {
+    await window.api.answerPair(req.id, value === 'allow');
+    state.settings = await window.api.getSettings();
+    if (pairQueue.length) setTimeout(() => showPairRequest(pairQueue.shift()), 0);
+  });
 }
 
 async function renderBrowserPane() {
@@ -554,6 +698,8 @@ function openSettings() {
     })
   );
   $('#s-afterdone').value = s.afterDone;
+  $('#s-media-quality').value = s.mediaQuality;
+  window.api.mediaToolsStatus().then((st) => ($('#s-ytdlp-status').textContent = t().ytdlpStatus(st && st.version)));
   $('#s-autoupdate').checked = s.autoUpdate;
   window.api.updateStatus().then(showUpdateStatus);
   showTab('general');
@@ -590,6 +736,7 @@ async function saveSettingsFromDialog() {
       days: [...document.querySelectorAll('#s-sched-days input:checked')].map((i) => Number(i.value)),
     },
     afterDone: $('#s-afterdone').value,
+    mediaQuality: $('#s-media-quality').value,
     autoUpdate: $('#s-autoupdate').checked,
     logins: [...document.querySelectorAll('#s-logins .login-row')].map((r) => ({
       host: r.querySelector('.l-host').value.trim(),
@@ -598,6 +745,7 @@ async function saveSettingsFromDialog() {
     })),
   });
   render();
+  renderAfterDoneBanner();
 }
 
 // ---------- drag & drop ----------
@@ -673,16 +821,12 @@ function showPowerCountdown({ action, seconds }) {
   }, 1000);
   dlg.returnValue = '';
   if (!dlg.open) dlg.showModal();
-  dlg.addEventListener(
-    'close',
-    async () => {
-      clearInterval(powerTick);
-      if (dlg.returnValue === 'cancel' || dlg.returnValue === '') await window.api.cancelPower();
-      state.settings = await window.api.getSettings();
-      renderAfterDoneBanner();
-    },
-    { once: true }
-  );
+  onDialogDone(dlg, async (value) => {
+    clearInterval(powerTick);
+    if (value !== 'done') await window.api.cancelPower(); // Cancel button or Esc
+    state.settings = await window.api.getSettings();
+    renderAfterDoneBanner();
+  });
 }
 
 // ---------- startup ----------
@@ -761,9 +905,22 @@ async function init() {
 
   // Closing the add dialog without starting: forget the browser request (and its cookies).
   $('#dlg-add').addEventListener('close', () => {
+    // 'close' can arrive late (window hidden): if the dialog is open again by then, it
+    // belongs to a newer link, so leave it alone.
+    if ($('#dlg-add').open) return;
     if (add.requestId && !add.submitted) window.api.discardRequest(add.requestId);
     add.requestId = null;
   });
+
+  // Video sites: quality choice, yt-dlp update
+  $('#in-quality').onchange = onQualityChange;
+  $('#s-ytdlp-update').onclick = async () => {
+    const tr = t();
+    $('#s-ytdlp-status').textContent = tr.ytdlpResult.checking;
+    const r = await window.api.updateMediaTools();
+    const res = r && r.result;
+    $('#s-ytdlp-status').textContent = `${tr.ytdlpStatus(r && r.version)} · ${tr.ytdlpResult[res] || res || ''}`;
+  };
 
   // Torrent files, checksum check, updates, "after done"
   $('#btn-torrent').onclick = () => openTorrentFile();

@@ -76,10 +76,31 @@ async function renderMedia(connected) {
   }
 }
 
+/** "Download this video" when the tab is a YouTube / Facebook / Instagram … video page. */
+async function renderPageVideo(connected) {
+  const tabId = await currentTabId();
+  const page = await send({ cmd: 'pageInfo', tabId });
+  const onVideoSite = !!(page && page.site);
+  $('#page-video').hidden = !onVideoSite;
+  // On video sites the page's own pieces are useless; the button above replaces that list.
+  for (const el of [$('#media-heading'), $('#media'), $('#media-empty')]) el.classList.toggle('gone', onVideoSite);
+  if (!onVideoSite) return;
+  $('#pv-site').textContent = page.site;
+  $('#pv-title').textContent = page.title.replace(/ - YouTube$/, '');
+  const btn = $('#btn-page');
+  btn.disabled = !connected;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const r = await send({ cmd: 'sendPage', tabId });
+    btn.textContent = msg(r && r.ok ? 'sent' : 'sendFailed');
+  };
+}
+
 async function refresh() {
   const { status, capture } = await send({ cmd: 'status' });
   setStatus(status);
   $('#capture').checked = capture;
+  await renderPageVideo(status === 'connected');
   await renderMedia(status === 'connected');
   return status;
 }

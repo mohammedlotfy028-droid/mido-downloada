@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:" />
   <title>Mido Download</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -84,7 +84,19 @@
         </div>
       </label>
       <div class="probe" id="probe-info" hidden></div>
-      <label>
+      <!-- YouTube / Facebook / Instagram: video preview + quality -->
+      <div class="media-box" id="media-box" hidden>
+        <img id="media-thumb" alt="" referrerpolicy="no-referrer" />
+        <div class="media-meta">
+          <div class="media-title" id="media-title" dir="auto"></div>
+          <div class="media-sub" id="media-sub" dir="auto"></div>
+        </div>
+      </div>
+      <label id="lbl-quality" hidden>
+        <span data-i18n="quality"></span>
+        <select id="in-quality"></select>
+      </label>
+      <label id="lbl-name">
         <span data-i18n="fileName"></span>
         <input id="in-name" type="text" dir="auto" data-i18n-placeholder="fileNameHint" />
       </label>
@@ -96,7 +108,7 @@
         </div>
       </label>
       <div class="grid2">
-        <label>
+        <label id="lbl-split">
           <span data-i18n="parts"></span>
           <div class="row">
             <input id="in-split" type="range" min="1" max="16" value="8" />
@@ -229,6 +241,24 @@
         </label>
         <label class="check"><input type="checkbox" id="s-categorize" /><span data-i18n="categorize"></span></label>
         <p class="hint" data-i18n="categorizeHint"></p>
+        <label>
+          <span data-i18n="mediaQualityDefault"></span>
+          <select id="s-media-quality">
+            <option value="best" data-i18n="qBest"></option>
+            <option value="2160">2160p (4K)</option>
+            <option value="1440">1440p</option>
+            <option value="1080">1080p</option>
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+            <option value="360">360p</option>
+            <option value="mp3" data-i18n="qMp3"></option>
+            <option value="m4a" data-i18n="qM4a"></option>
+          </select>
+        </label>
+        <div class="row">
+          <span class="hint" id="s-ytdlp-status"></span>
+          <button type="button" class="btn sm-btn" id="s-ytdlp-update" data-i18n="updateYtdlp"></button>
+        </div>
         <label class="check"><input type="checkbox" id="s-clipboard" /><span data-i18n="clipboardWatch"></span></label>
         <label class="check"><input type="checkbox" id="s-notifications" /><span data-i18n="notifications"></span></label>
         <label class="check"><input type="checkbox" id="s-tray" /><span data-i18n="closeToTray"></span></label>

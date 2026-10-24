@@ -53,6 +53,27 @@ http
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Disposition': 'attachment; filename="readme.txt"' });
       return res.end('hello from the test site\n');
     }
+    // /static/<file> serves files from STATIC_DIR (HLS playlists + segments, test videos).
+    if (req.url.startsWith('/static/') && process.env.STATIC_DIR) {
+      const root = require('path').resolve(process.env.STATIC_DIR);
+      const f = require('path').join(root, decodeURIComponent(req.url.slice(8).split('?')[0]));
+      if (!f.startsWith(root) || !fs.existsSync(f)) {
+        res.writeHead(404);
+        return res.end();
+      }
+      const types = { '.m3u8': 'application/vnd.apple.mpegurl', '.ts': 'video/mp2t', '.mp4': 'video/mp4', '.html': 'text/html' };
+      const total = fs.statSync(f).size;
+      const r = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+      const type = types[require('path').extname(f)] || 'application/octet-stream';
+      if (r) {
+        const a = Number(r[1] || 0);
+        const b = r[2] ? Number(r[2]) : total - 1;
+        res.writeHead(206, { 'Content-Type': type, 'Content-Range': `bytes ${a}-${b}/${total}`, 'Content-Length': b - a + 1, 'Accept-Ranges': 'bytes' });
+        return fs.createReadStream(f, { start: a, end: b }).pipe(res);
+      }
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': total, 'Accept-Ranges': 'bytes' });
+      return fs.createReadStream(f).pipe(res);
+    }
     // Tiny BitTorrent tracker: every torrent's only peer is the test seeder (SEED_PORT).
     if (req.url.startsWith('/announce')) {
       const port = Number(process.env.SEED_PORT || 0);

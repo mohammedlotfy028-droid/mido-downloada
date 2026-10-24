@@ -33,6 +33,9 @@ jobs:
       - name: Get aria2 (official release)
         run: npm run fetch-aria2
 
+      - name: Get yt-dlp and ffmpeg (official builds, for video sites)
+        run: npm run fetch-media-tools
+
       - name: Engine test
         run: node test/engine-test.js
 

@@ -2,7 +2,7 @@
 // - Catches browser downloads and sends them to the app (with cookies + Referer)
 // - Right-click menu "Download with Mido Download"
 // - Notices videos/audio a page plays, so the popup can send them to the app
-importScripts('capture-rules.js');
+importScripts('capture-rules.js', 'media-sites.js');
 
 const DEFAULT_PORT = 47811;
 
@@ -77,6 +77,22 @@ async function cookieHeader(url) {
   }
 }
 
+/**
+ * The same cookies with their domains, for video sites: the app hands them to yt-dlp, which
+ * also calls the site's other addresses (e.g. youtube.com and its video servers).
+ */
+async function cookieList(url) {
+  if (!mediaSiteOf(url)) return [];
+  try {
+    const list = await chrome.cookies.getAll({ url });
+    return list.map(({ name, value, domain, path, secure, httpOnly, hostOnly, expirationDate }) => ({
+      name, value, domain, path, secure, httpOnly, hostOnly, expirationDate: expirationDate || 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** Sends one link to the app. Returns true if the app took it. */
 async function sendToApp({ url, referrer = '', filename = '', fileSize = 0, mime = '', source }) {
   const { token } = await getConfig();
@@ -88,6 +104,7 @@ async function sendToApp({ url, referrer = '', filename = '', fileSize = 0, mime
     body: {
       url, referrer, filename, fileSize, mime, source,
       cookies: await cookieHeader(url),
+      cookieList: await cookieList(url),
       userAgent: navigator.userAgent,
     },
   });
@@ -132,7 +149,8 @@ async function handleMenuClick(info, tab) {
   const url = info.linkUrl || info.srcUrl;
   if (!url || !/^(https?|ftp):/i.test(url)) return false;
   const ok = await sendToApp({ url, referrer: info.pageUrl || (tab && tab.url) || '', source: 'menu' });
-  if (!ok) chrome.downloads.download({ url }); // app not available: use the browser instead
+  // App not available: let the browser download it (not for video-site pages, that'd be HTML).
+  if (!ok && !mediaSiteOf(url)) chrome.downloads.download({ url });
   return ok;
 }
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -172,10 +190,13 @@ chrome.webRequest.onHeadersReceived.addListener(
     const range = /\/(\d+)\s*$/.exec(h['content-range'] || '');
     const size = range ? Number(range[1]) : Number(h['content-length'] || 0);
     if (size && size < 300 * 1024) return; // tiny sounds, previews…
-    chrome.tabs.get(d.tabId).then(
-      (tab) => recordMedia(d.tabId, { url: d.url, type, size, pageUrl: tab.url || '', title: tab.title || '' }),
-      () => {}
-    );
+    // Video sites stream in small pieces from their own servers; those pieces are useless on
+    // their own. For them the popup offers "Download this video" (the app uses yt-dlp).
+    if (/(^|\.)(googlevideo\.com|fbcdn\.net|cdninstagram\.com|tiktokcdn\.com|twimg\.com|vimeocdn\.com)$/.test(new URL(d.url).hostname)) return;
+    chrome.tabs.get(d.tabId).then((tab) => {
+      if (mediaSiteOf(tab.url || '')) return;
+      recordMedia(d.tabId, { url: d.url, type, size, pageUrl: tab.url || '', title: tab.title || '' });
+    }, () => {});
   },
   { urls: ['<all_urls>'], types: ['media', 'xmlhttprequest', 'other', 'object'] },
   ['responseHeaders']
@@ -203,6 +224,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
         return { ok: true };
       case 'media':
         return { media: await getMedia(msg.tabId) };
+      case 'pageInfo': {
+        // Is the tab a YouTube / Facebook / Instagram … video page?
+        const tab = await chrome.tabs.get(msg.tabId).catch(() => null);
+        return tab ? { site: mediaSiteOf(tab.url || ''), title: tab.title || '', url: tab.url || '' } : { site: null };
+      }
+      case 'sendPage': {
+        const tab = await chrome.tabs.get(msg.tabId).catch(() => null);
+        if (!tab || !mediaSiteOf(tab.url || '')) return { ok: false };
+        return { ok: await sendToApp({ url: tab.url, referrer: tab.url, filename: '', source: 'page' }) };
+      }
       case 'sendMedia': {
         const m = (await getMedia(msg.tabId)).find((x) => x.url === msg.url);
         if (!m) return { ok: false };

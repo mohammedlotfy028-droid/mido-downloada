@@ -5,7 +5,7 @@ An open-source download manager for Windows built on Electron and aria2.
 
 Download: [latest release](https://github.com/mohammedlotfy028-droid/mido-downloada/releases/latest)
 
-## Features (v0.4)
+## Features (v0.6)
 - Segmented downloads (1–16 connections, default 8)
 - Pause / resume / cancel / remove (optionally to Recycle Bin), open file / folder
 - Resumes after closing the app or a network drop; automatic retry with back-off on failures
@@ -17,6 +17,8 @@ Download: [latest release](https://github.com/mohammedlotfy028-droid/mido-downlo
 - Watches the clipboard for file links; drag & drop links on the window; Ctrl+V anywhere
 - Settings: proxy, User-Agent, default folder, saved site logins (passwords encrypted with Windows DPAPI)
 - Browser extension for Chrome / Edge (see below)
+- YouTube, Facebook, Instagram, TikTok, X, Vimeo… videos (yt-dlp + ffmpeg): pick the quality or audio only (MP3/M4A),
+  pause/resume, and a "Download this video" button in the extension that passes your login cookies
 - BitTorrent: open or drop `.torrent` files, paste `magnet:` links (stops seeding when done)
 - Checksums: give an MD5/SHA-1/SHA-256/SHA-512 when adding a download, or verify any finished file
 - Schedule: start and stop downloads at set times on chosen days (works across midnight)
@@ -44,7 +46,8 @@ removed from aria2's session file.
 ## Run from source
 ```bash
 npm install
-npm run fetch-aria2   # downloads aria2c.exe from the official GitHub release
+npm run fetch-aria2         # aria2c.exe from the official GitHub release
+npm run fetch-media-tools   # yt-dlp + ffmpeg (official builds) for video sites
 npm start
 ```
 
@@ -56,6 +59,7 @@ node test/phase2-test.js <screenshotDir>          # phase 2 features on the real
 node test/phase3-test.js <screenshotDir>          # extension in a temporary Edge profile + the app
 node test/phase4-test.js <screenshotDir>          # torrents (local tracker+seeder), checksums, schedule, fake shutdown
 npm run dist && node test/update-test.js <dir>    # packaged app finds/downloads an update from a local server
+node test/media-test.js <screenshotDir>           # YouTube (real), HLS, pause/resume, yt-dlp update, extension button
 node test/rename-test.js <screenshotDir>          # data from the old name (Mido Downloada) moves to the new folder
 ```
 
@@ -74,6 +78,10 @@ npm run dist          # output in dist/
    publishes it with `latest.yml` (used by automatic updates) and attaches the extension as a zip.
 
 The installer is not code-signed, so Windows SmartScreen may warn the first time ("More info" → "Run anyway").
+
+## Note on video sites
+Downloading from YouTube, Facebook, Instagram and others may be restricted by their terms of
+service and by copyright. Use it for videos you are allowed to download (your own, openly licensed…).
 
 ## License
 MIT — see [LICENSE](LICENSE). aria2 is GPLv2 and shipped as a separate executable; see [NOTICE](NOTICE).
