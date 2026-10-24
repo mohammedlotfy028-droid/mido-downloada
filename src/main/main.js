@@ -238,8 +238,9 @@ const T = {
 const tr = () => T[settings.values.lang] || T.en;
 
 let pollCount = 0;
+let engineRestarting = false; // aria2 is being started again after it died
 async function poll() {
-  if (!dm) return;
+  if (!dm || engineRestarting) return;
   try {
     // Save unfinished downloads every 5s so a crash loses almost nothing
     // (aria2's own periodic save is off because it writes passwords in plain text).
@@ -593,6 +594,29 @@ app.whenReady().then(async () => {
     );
     dm.on('failed', (item) => notify(tr().failed, `${item.name}\n${item.errorMessage || ''}`, showWindow));
     await dm.restoreAfterStart();
+
+    // If aria2 is killed (antivirus, crash, Task Manager) start it again and put the
+    // unfinished downloads back, instead of leaving the app without an engine.
+    aria2.on('died', async (code) => {
+      console.error(`[aria2] stopped unexpectedly (code ${code}), restarting`);
+      engineRestarting = true;
+      for (let attempt = 1; attempt <= 5 && !quitting; attempt++) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        if (quitting) break;
+        try {
+          await aria2.start(settings.aria2Options());
+          await dm.restoreAfterStart();
+          console.log('[aria2] restarted');
+          break;
+        } catch (e) {
+          console.error(`[aria2] restart attempt ${attempt} failed: ${e.message}`);
+        }
+      }
+      engineRestarting = false;
+      if (!quitting && !aria2.ready) {
+        notify(tr().failed, 'aria2', showWindow);
+      }
+    });
 
     // Video sites (YouTube, Facebook, Instagram…) through yt-dlp + ffmpeg.
     mediaTools = new MediaTools({ resourcesDir: resourcesDir(), dataDir });

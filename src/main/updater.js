@@ -1,9 +1,24 @@
 // Automatic updates from GitHub Releases (electron-updater).
 // The new version is downloaded in the background; the user picks when to restart.
 const { app } = require('electron');
-const pkg = require('../../package.json');
+const fs = require('fs');
+const path = require('path');
 
 const PLACEHOLDER_OWNER = 'CHANGE-ME';
+
+/**
+ * Who publishes our releases. electron-builder removes the "build" settings from the
+ * package.json inside the installed app and writes them to resources/app-update.yml
+ * instead, so that is where an installed copy has to look.
+ */
+function publishOwner() {
+  try {
+    const yml = fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8');
+    return (/^owner:\s*(\S+)/m.exec(yml) || [])[1] || '';
+  } catch {
+    return '';
+  }
+}
 
 class Updater {
   /** @param {(status:object) => void} onStatus  sends the state to the UI */
@@ -12,7 +27,7 @@ class Updater {
     this.status = { state: 'idle', version: app.getVersion() };
     this.updater = null;
     this.timer = null;
-    const owner = ((pkg.build && pkg.build.publish) || [])[0]?.owner;
+    const owner = publishOwner();
     const feed = process.env.MIDO_UPDATE_URL; // tests: a local server instead of GitHub
     // Only an installed copy can update itself, and only once the GitHub repo is set.
     this.enabled = (app.isPackaged && owner && owner !== PLACEHOLDER_OWNER) || !!feed;

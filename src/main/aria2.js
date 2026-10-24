@@ -2,6 +2,7 @@
 // This file has no Electron dependency so it can be tested with plain Node.
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const EventEmitter = require('events');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
@@ -20,7 +21,8 @@ function getFreePort() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-class Aria2 {
+/** Emits 'died' (exit code) when aria2 stops by itself while the app didn't ask it to. */
+class Aria2 extends EventEmitter {
   /**
    * @param {object} opts
    * @param {string} opts.binPath    full path to aria2c.exe
@@ -28,6 +30,9 @@ class Aria2 {
    * @param {number} [opts.parentPid] aria2 exits by itself if this process dies
    */
   constructor({ binPath, dataDir, parentPid }) {
+    super();
+    this.stopping = false;
+    this.ready = false;
     this.binPath = binPath;
     this.dataDir = dataDir;
     this.parentPid = parentPid || process.pid;
@@ -102,10 +107,17 @@ class Aria2 {
     };
     this.proc.stdout.on('data', log);
     this.proc.stderr.on('data', log);
-    const exited = new Promise((resolve) => this.proc.once('exit', resolve));
-    this.proc.once('exit', (code) => {
+    const proc = this.proc;
+    this.stopping = false;
+    this.ready = false;
+    const exited = new Promise((resolve) => proc.once('exit', resolve));
+    proc.once('exit', (code) => {
       console.log(`[aria2] exited with code ${code}`);
-      this.proc = null;
+      if (this.proc === proc) this.proc = null;
+      if (this.ready && !this.stopping) {
+        this.ready = false;
+        this.emit('died', code);
+      }
     });
 
     // Wait until the RPC server answers.
@@ -113,6 +125,7 @@ class Aria2 {
       if (!this.proc) throw new Error(`aria2 exited during startup (code ${await exited})`);
       try {
         await this.call('getVersion');
+        this.ready = true;
         return;
       } catch {
         await sleep(100);
@@ -145,6 +158,7 @@ class Aria2 {
 
   /** Saves the session and shuts aria2 down; kills it if it doesn't exit in time. */
   async stop() {
+    this.stopping = true; // from now on an exit is expected, not a crash
     if (!this.proc) return;
     try {
       await this._shutdown();
