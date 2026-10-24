@@ -18,7 +18,8 @@ const PORT = 8775;
 const BASE = `http://127.0.0.1:${PORT}`;
 const YT = 'https://www.youtube.com/watch?v=jNQXAC9IVRw'; // "Me at the zoo", 19 seconds
 const FF = path.join(ROOT, 'resources', 'ffmpeg');
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+// TEST_BROWSER=<path to chrome.exe> runs the extension part on Chrome instead of Edge.
+const EDGE = process.env.TEST_BROWSER || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const EXT_ID = 'deaodfooaihmngfdanpadajieidlcngd';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mido-media-'));
@@ -157,10 +158,21 @@ const dialogMedia = () => waitFor(() => app.evaluate(`!document.querySelector('#
   // ---------- 5. extension: "Download this video" on a YouTube page ----------
   const profile = path.join(tmp, 'edge');
   fs.mkdirSync(path.join(profile, 'Default'), { recursive: true });
-  edge = spawn(EDGE, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9445',
-    `--load-extension=${path.join(ROOT, 'extension')}`, `--disable-extensions-except=${path.join(ROOT, 'extension')}`, 'about:blank'], { stdio: 'ignore' });
   const ej = (p, m = 'GET') => fetch(`http://127.0.0.1:9445${p}`, { method: m }).then((r) => r.json());
-  await waitFor(() => ej('/json/version').catch(() => null), 20000);
+  if (/chrome\.exe$/i.test(EDGE)) {
+    // Chrome ignores --load-extension; load it through its DevTools pipe instead.
+    edge = spawn(EDGE, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-pipe',
+      '--enable-unsafe-extension-debugging', '--remote-debugging-port=9445', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+    await waitFor(() => ej('/json/version').catch(() => null), 20000);
+    await new Promise((resolve) => {
+      edge.stdio[4].once('data', resolve);
+      edge.stdio[3].write(`${JSON.stringify({ id: 1, method: 'Extensions.loadUnpacked', params: { path: path.join(ROOT, 'extension') } })}\0`);
+    });
+  } else {
+    edge = spawn(EDGE, [`--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9445',
+      `--load-extension=${path.join(ROOT, 'extension')}`, `--disable-extensions-except=${path.join(ROOT, 'extension')}`, 'about:blank'], { stdio: 'ignore' });
+    await waitFor(() => ej('/json/version').catch(() => null), 20000);
+  }
   const sw = await waitFor(async () => {
     const t = (await ej('/json')).find((x) => x.type === 'service_worker' && x.url.includes(EXT_ID));
     if (!t) return null;

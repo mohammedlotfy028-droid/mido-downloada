@@ -12,7 +12,8 @@ const path = require('path');
 const { ROOT, sleep, check, waitFor, launchApp, connectTarget, items } = require('./cdp');
 
 const SHOTS = path.resolve(process.argv[2] || '.');
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+// TEST_BROWSER=<path to chrome.exe> runs the same test on Chrome instead of Edge.
+const EDGE = process.env.TEST_BROWSER || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const EXT_ID = 'deaodfooaihmngfdanpadajieidlcngd';
 const PORT = 8768; // test website
 const BRIDGE = 47899; // app <-> extension (not the real 47811, in case the real app runs)
@@ -91,15 +92,31 @@ async function extensionWorker() {
   check((await bridgeRequest('POST', '/v1/download', { ...extOrigin, Authorization: 'Bearer 1234' }, { url: `${BASE}/x.zip` })).status === 401, 'bridge: a made-up token is refused');
 
   // ---------- 2. Edge with the extension ----------
-  edge = spawn(EDGE, [
-    `--user-data-dir=${edgeProfile}`, '--no-first-run', '--no-default-browser-check',
-    `--remote-debugging-port=${EDGE_DEBUG}`,
-    `--load-extension=${path.join(ROOT, 'extension')}`, `--disable-extensions-except=${path.join(ROOT, 'extension')}`,
-    'about:blank',
-  ], { stdio: 'ignore' });
-  await waitFor(() => edgeJson('/json/version').catch(() => null), 20000);
+  const isChrome = /chrome\.exe$/i.test(EDGE);
+  const browserName = isChrome ? 'Chrome' : 'Edge';
+  if (isChrome) {
+    // Chrome ignores --load-extension; load it through its DevTools pipe instead.
+    edge = spawn(EDGE, [
+      `--user-data-dir=${edgeProfile}`, '--no-first-run', '--no-default-browser-check',
+      '--remote-debugging-pipe', '--enable-unsafe-extension-debugging', `--remote-debugging-port=${EDGE_DEBUG}`, 'about:blank',
+    ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+    await waitFor(() => edgeJson('/json/version').catch(() => null), 20000);
+    const loaded = new Promise((resolve) => {
+      edge.stdio[4].once('data', (d) => resolve(String(d)));
+      edge.stdio[3].write(`${JSON.stringify({ id: 1, method: 'Extensions.loadUnpacked', params: { path: path.join(ROOT, 'extension') } })}\0`);
+    });
+    await loaded;
+  } else {
+    edge = spawn(EDGE, [
+      `--user-data-dir=${edgeProfile}`, '--no-first-run', '--no-default-browser-check',
+      `--remote-debugging-port=${EDGE_DEBUG}`,
+      `--load-extension=${path.join(ROOT, 'extension')}`, `--disable-extensions-except=${path.join(ROOT, 'extension')}`,
+      'about:blank',
+    ], { stdio: 'ignore' });
+    await waitFor(() => edgeJson('/json/version').catch(() => null), 20000);
+  }
   let sw = await extensionWorker();
-  check(!!sw, `extension loaded in Edge (id ${EXT_ID})`);
+  check(!!sw, `extension loaded in ${browserName} (id ${EXT_ID})`);
   await sw.evaluate(`chrome.storage.local.set({ port: ${BRIDGE} })`);
 
   // ---------- 3. pairing ----------
@@ -111,7 +128,7 @@ async function extensionWorker() {
   await popup.shot(path.join(SHOTS, 'p3-1-popup-not-paired.png'));
   await popup.evaluate(`document.querySelector('#btn-connect').click(), true`);
   const pairName = await waitFor(() => app.evaluate(`document.querySelector('#dlg-pair').open && document.querySelector('#pair-name').textContent`), 10000);
-  check(/Edge/.test(pairName || ''), `app asks to allow the pairing: "${pairName}"`);
+  check(new RegExp(isChrome ? 'Chrome' : 'Edge').test(pairName || ''), `app asks to allow the pairing: "${pairName}"`);
   await app.shot(path.join(SHOTS, 'p3-2-app-pair-request.png'));
   await app.evaluate(`document.querySelector('#btn-pair-allow').click()`);
   await waitFor(async () => (await popupStatus()) === 'connected', 10000);
