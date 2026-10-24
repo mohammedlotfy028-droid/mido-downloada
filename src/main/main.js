@@ -19,7 +19,8 @@ const { beforeAppClose } = require('./quit-behavior');
 const { CATEGORIES, categoryOf } = require('../shared/categories');
 const { MediaManager } = require('./media');
 const { MediaTools } = require('./media-tools');
-const { mediaSiteOf } = require('../shared/media-sites');
+const { mediaSiteOf, isPlaylistPage, playlistUrlOf } = require('../shared/media-sites');
+const { safeFileName } = require('./probe');
 
 // Dev/test: run with a separate data folder so tests don't touch real data.
 if (process.env.MIDO_DATA_DIR) app.setPath('userData', path.resolve(process.env.MIDO_DATA_DIR));
@@ -232,8 +233,14 @@ function notify(title, body, onClick) {
 }
 
 const T = {
-  ar: { done: 'اكتمل التحميل', failed: 'فشل التحميل' },
-  en: { done: 'Download complete', failed: 'Download failed' },
+  ar: {
+    done: 'اكتمل التحميل', failed: 'فشل التحميل', playlistDone: 'انتهت قائمة التشغيل',
+    playlistBody: (s) => `${s.title}\n${s.complete} من ${s.total}${s.failed ? ` · فشل ${s.failed}` : ''}`,
+  },
+  en: {
+    done: 'Download complete', failed: 'Download failed', playlistDone: 'Playlist finished',
+    playlistBody: (s) => `${s.title}\n${s.complete} of ${s.total}${s.failed ? ` · ${s.failed} failed` : ''}`,
+  },
 };
 const tr = () => T[settings.values.lang] || T.en;
 
@@ -291,7 +298,11 @@ async function probeLink(url, browserReq = null) {
   const site = mediaSiteOf(url);
   if (site) {
     // A video site: yt-dlp looks at it (dl:mediaInfo), which is slower; tell the UI first.
-    return { ok: true, media: true, site, name: '', size: 0, type: '', resumable: true, category: 'video', dir: suggestDir('video') };
+    return {
+      ok: true, media: true, site, name: '', size: 0, type: '', resumable: true, category: 'video', dir: suggestDir('video'),
+      playlist: isPlaylistPage(url), // the link IS a playlist
+      playlistUrl: isPlaylistPage(url) ? '' : playlistUrlOf(url), // a video that also belongs to one
+    };
   }
   if (/^magnet:/i.test(url)) {
     // Nothing to check over HTTP; the name/size arrive from other peers later.
@@ -324,7 +335,8 @@ async function onBrowserDownload(req) {
   // Forget requests the user never answered after 30 minutes.
   for (const [id, r] of browserRequests) if (Date.now() - r.at > 30 * 60000) browserRequests.delete(id);
 
-  if (settings.values.browserAsk) {
+  // A playlist always needs the dialog (which videos? which quality?), even if "ask" is off.
+  if (settings.values.browserAsk || isPlaylistPage(req.url)) {
     const id = crypto.randomBytes(8).toString('hex');
     browserRequests.set(id, entry);
     openAddDialog(req.url, { requestId: id, name: entry.filename, size: entry.fileSize, source: req.source });
@@ -418,10 +430,40 @@ function registerIpc() {
     if (!media || !mediaTools.available()) return { ok: false, error: 'NO_TOOLS' };
     return media.info(url, mediaSecret(takeBrowserRequest(requestId, { keep: true })));
   });
+  // A playlist link: the list of its videos (titles and lengths).
+  handle('dl:playlistInfo', async (url, requestId) => {
+    await waitForMedia();
+    if (!media || !mediaTools.available()) return { ok: false, error: 'NO_TOOLS' };
+    return media.playlist(url, mediaSecret(takeBrowserRequest(requestId, { keep: true })));
+  });
+  handle('dl:cancelPlaylist', (gid) => (isMediaGid(gid) && media ? media.cancelPlaylist(gid) : null));
 
   handle('dl:add', async (opts) => {
     // Links from the browser carry cookies/Referer that stay in the main process.
     const req = takeBrowserRequest(opts.requestId);
+    if (opts.mediaQuality && opts.mediaPlaylist) {
+      await waitForMedia();
+      if (!media) throw new Error('NO_TOOLS');
+      const pl = opts.mediaPlaylist;
+      const q = opts.mediaQuality;
+      const entries = (Array.isArray(pl.entries) ? pl.entries : []).slice(0, 300).map((e) => {
+        // Only video-site links (or, in tests, any http link). Otherwise build it from the video id.
+        const own = String(e.url || '');
+        const ok = mediaSiteOf(own) || (process.env.MIDO_TEST === '1' && /^https?:\/\//.test(own));
+        const url = ok ? own : /^[\w-]{11}$/.test(String(e.id)) ? `https://www.youtube.com/watch?v=${e.id}` : '';
+        return { url, title: String(e.title || '').slice(0, 300), index: Math.max(1, Number(e.index) || 1) };
+      }).filter((e) => e.url);
+      if (!entries.length) throw new Error('NO_VIDEOS');
+      const audio = q.type === 'audio';
+      const dir = pl.subfolder ? path.join(opts.dir, safeFileName(pl.title) || 'playlist') : opts.dir;
+      media.addPlaylist({
+        playlist: { id: String(pl.id || crypto.randomBytes(4).toString('hex')), title: String(pl.title || 'playlist').slice(0, 200), total: Number(pl.total) || entries.length },
+        entries, dir, numbered: pl.numbered !== false,
+        quality: audio ? { type: 'audio', format: q.format === 'm4a' ? 'm4a' : 'mp3' } : { type: 'video', height: Number(q.height) || 0 },
+        category: audio ? 'music' : 'video', speedLimit: opts.speedLimit || 0, secret: mediaSecret(req),
+      });
+      return entries.length;
+    }
     if (opts.mediaQuality) {
       await waitForMedia();
       if (!media) throw new Error('NO_TOOLS');
@@ -627,12 +669,26 @@ app.whenReady().then(async () => {
       settings: () => settings.values,
       secrets: { encrypt, decrypt },
     });
-    media.on('complete', (item) =>
+    // A playlist gets ONE notification when its last video is done, not one per video.
+    const playlistFinished = (item) => {
+      if (!item.playlist || media.playlistBusy(item.playlist.id)) return false;
+      const s = media.playlistSummary(item.playlist.id);
+      notify(tr().playlistDone, tr().playlistBody(s), () => {
+        if (item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
+        else showWindow();
+      });
+      return true;
+    };
+    media.on('complete', (item) => {
+      if (item.playlist) return playlistFinished(item);
       notify(tr().done, item.name, () => {
         if (item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
-      })
-    );
-    media.on('failed', (item) => notify(tr().failed, `${item.name}\n${item.errorMessage || ''}`, showWindow));
+      });
+    });
+    media.on('failed', (item) => {
+      if (item.playlist) return playlistFinished(item);
+      notify(tr().failed, `${item.name}\n${item.errorMessage || ''}`, showWindow);
+    });
     media.schedule(); // continue videos that were downloading when the app closed
     markMediaReady();
     // Keep yt-dlp fresh (sites change often): check a minute after start, then twice a day.

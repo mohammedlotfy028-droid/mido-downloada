@@ -227,7 +227,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       case 'pageInfo': {
         // Is the tab a YouTube / Facebook / Instagram … video page?
         const tab = await chrome.tabs.get(msg.tabId).catch(() => null);
-        return tab ? { site: mediaSiteOf(tab.url || ''), title: tab.title || '', url: tab.url || '' } : { site: null };
+        return tab
+          ? { site: mediaSiteOf(tab.url || ''), playlist: isPlaylistPage(tab.url || ''), title: tab.title || '', url: tab.url || '' }
+          : { site: null };
       }
       case 'sendPage': {
         const tab = await chrome.tabs.get(msg.tabId).catch(() => null);

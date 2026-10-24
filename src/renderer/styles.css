@@ -284,3 +284,26 @@ dialog select:focus, dialog input[type='time']:focus { outline: 2px solid var(--
 .probe { white-space: pre-line; }
 #s-ytdlp-status { flex: 1; margin: 0; }
 #btn-torrent { white-space: nowrap; flex: none; }
+
+/* ---------- playlists ---------- */
+.playlist-box { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); overflow: hidden; }
+.pl-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 10px 12px; }
+.pl-meta { min-width: 0; }
+.pl-tools { display: flex; gap: 6px; flex: none; }
+.pl-list { max-height: min(230px, 26vh); overflow: auto; border-top: 1px solid var(--border); background: var(--surface); }
+.pl-row {
+  display: grid; grid-template-columns: 18px 28px 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 12px; color: var(--text); font-size: 13px; cursor: pointer;
+}
+.pl-row:hover { background: var(--surface-2); }
+.pl-row.off { opacity: 0.5; cursor: default; }
+.pl-row input { accent-color: var(--accent); margin: 0; }
+.pl-n { color: var(--muted); font-size: 12px; text-align: end; font-variant-numeric: tabular-nums; }
+.pl-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-d { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pl-count { padding: 8px 12px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); }
+.pl-offer {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 13px;
+}
+.media-sub { white-space: pre-line; }

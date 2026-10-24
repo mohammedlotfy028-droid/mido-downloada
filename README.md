@@ -5,7 +5,7 @@ An open-source download manager for Windows built on Electron and aria2.
 
 Download: [latest release](https://github.com/mohammedlotfy028-droid/mido-downloada/releases/latest)
 
-## Features (v0.6)
+## Features (v0.7)
 - Segmented downloads (1–16 connections, default 8)
 - Pause / resume / cancel / remove (optionally to Recycle Bin), open file / folder
 - Resumes after closing the app or a network drop; automatic retry with back-off on failures
@@ -18,7 +18,8 @@ Download: [latest release](https://github.com/mohammedlotfy028-droid/mido-downlo
 - Settings: proxy, User-Agent, default folder, saved site logins (passwords encrypted with Windows DPAPI)
 - Browser extension for Chrome / Edge (see below)
 - YouTube, Facebook, Instagram, TikTok, X, Vimeo… videos (yt-dlp + ffmpeg): pick the quality or audio only (MP3/M4A),
-  pause/resume, and a "Download this video" button in the extension that passes your login cookies
+  pause/resume, **YouTube playlists** (tick the videos you want, quality for all, numbered files in a folder named after the
+  playlist, one notification when the list is done, "cancel the rest"), and a "Download this video" button in the extension that passes your login cookies
 - BitTorrent: open or drop `.torrent` files, paste `magnet:` links (stops seeding when done)
 - Checksums: give an MD5/SHA-1/SHA-256/SHA-512 when adding a download, or verify any finished file
 - Schedule: start and stop downloads at set times on chosen days (works across midnight)
@@ -59,6 +60,9 @@ node test/phase2-test.js <screenshotDir>          # phase 2 features on the real
 node test/phase3-test.js <screenshotDir>          # extension in a temporary Edge profile + the app
 node test/phase4-test.js <screenshotDir>          # torrents (local tracker+seeder), checksums, schedule, fake shutdown
 npm run dist && node test/update-test.js <dir>    # packaged app finds/downloads an update from a local server
+node test/media-unit-test.js                      # helpers of the video engine (no app, no internet)
+node test/playlist-test.js <screenshotDir>        # real YouTube playlist + local playlist logic
+node test/installed-test.js [exe]                 # end-to-end check of an installed copy (isolated data folder)
 node test/media-test.js <screenshotDir>           # YouTube (real), HLS, pause/resume, yt-dlp update, extension button
 node test/rename-test.js <screenshotDir>          # data from the old name (Mido Downloada) moves to the new folder
 ```

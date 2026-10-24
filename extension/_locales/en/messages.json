@@ -52,5 +52,8 @@
   },
   "downloadThisVideo": {
     "message": "Download this video"
+  },
+  "downloadThisPlaylist": {
+    "message": "Download this playlist"
   }
 }

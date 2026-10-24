@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('api', {
 
   probe: (url, requestId) => ipcRenderer.invoke('dl:probe', url, requestId),
   mediaInfo: (url, requestId) => ipcRenderer.invoke('dl:mediaInfo', url, requestId),
+  playlistInfo: (url, requestId) => ipcRenderer.invoke('dl:playlistInfo', url, requestId),
+  cancelPlaylist: (gid) => ipcRenderer.invoke('dl:cancelPlaylist', gid),
   mediaToolsStatus: () => ipcRenderer.invoke('media:toolsStatus'),
   updateMediaTools: () => ipcRenderer.invoke('media:updateTools'),
   discardRequest: (requestId) => ipcRenderer.invoke('dl:discardRequest', requestId),

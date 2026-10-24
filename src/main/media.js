@@ -17,6 +17,33 @@ const PERMANENT = /private video|video unavailable|is not available|has been rem
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** The file-name prefix of a playlist video ("03 - "), limited to characters that are safe in a yt-dlp template. */
+const cleanPrefix = (p) => String(p || '').replace(/[^\w .()\-]/g, '');
+
+/**
+ * The finished file of a video. yt-dlp's printed path can differ from the real file name
+ * (it drops characters like ":" and quotes, while the file gets full-width look-alikes), so
+ * when that path doesn't exist we look for "[<video id>]" in the folder instead.
+ */
+function findFinalFile(dir, id, prefix = '') {
+  if (!id || id === 'NA') return '';
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return '';
+  }
+  const start = cleanPrefix(prefix);
+  const found = names
+    .filter((n) => n.includes(`[${id}]`) && n.startsWith(start) && !/\.(part|ytdl)$/i.test(n) && !/\.temp\./i.test(n) && !/\.f\d+\.[a-z0-9]+$/i.test(n))
+    .map((n) => ({ file: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  return found.length ? found[0].file : '';
+}
+
+// Longer playlists are cut here (a 5,000-row list would be unusable and slow to start).
+const MAX_PLAYLIST = 300;
+
 function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -225,25 +252,126 @@ class MediaManager extends EventEmitter {
     };
   }
 
+  // ---------- playlists ----------
+  /**
+   * The videos of a playlist (titles and lengths only: "flat" extraction is fast, it doesn't
+   * look inside each video). At most MAX_PLAYLIST videos.
+   * @returns {Promise<{ok:boolean, error?:string, id?:string, title?:string, uploader?:string,
+   *   total?:number, truncated?:boolean, entries?:Array<{id:string, title:string, duration:number, url:string, unavailable:boolean}>}>}
+   */
+  async playlist(url, secret = null) {
+    const name = `pl-${crypto.randomBytes(6).toString('hex')}`;
+    const { args, cookieFile } = this.requestArgs(secret, name);
+    let out = '';
+    const { done } = this.run(
+      [...this.baseArgs(), ...args, '--yes-playlist', '--flat-playlist', '--playlist-end', String(MAX_PLAYLIST), '-J', '--no-warnings', url],
+      { onLine: (l) => (out += `${l}\n`), timeout: 120000 }
+    );
+    const r = await done;
+    if (cookieFile) fs.rmSync(cookieFile, { force: true });
+    let j = null;
+    try {
+      j = JSON.parse(out);
+    } catch {}
+    if (!j || typeof j !== 'object') return { ok: false, error: r.lastError || `yt-dlp exited with code ${r.code}` };
+    if (j._type !== 'playlist' || !Array.isArray(j.entries)) return { ok: false, error: 'NOT_PLAYLIST' };
+    const entries = j.entries
+      .filter((e) => e && e.id)
+      .map((e) => ({
+        id: String(e.id),
+        title: e.title || e.id,
+        duration: num(e.duration),
+        url: /^https:/.test(e.url || '') ? e.url : `https://www.youtube.com/watch?v=${e.id}`,
+        // Deleted / private videos still show up in the list, with a placeholder title.
+        unavailable: /^\[(private|deleted) video\]$/i.test(e.title || '') || e.availability === 'private',
+      }));
+    const total = num(j.playlist_count) || entries.length;
+    return {
+      ok: true,
+      id: String(j.id || ''),
+      title: j.title || 'playlist',
+      uploader: j.uploader || j.channel || '',
+      total,
+      truncated: total > entries.length,
+      entries,
+    };
+  }
+
+  /** Stops every unfinished video of the playlist this download belongs to. */
+  async cancelPlaylist(gid) {
+    const pl = this.items[gid] && this.items[gid].playlist;
+    if (!pl) return;
+    for (const item of Object.values(this.items)) {
+      if (item.playlist && item.playlist.id === pl.id && ['waiting', 'active', 'paused', 'error'].includes(item.status)) {
+        await this.cancel(item.gid);
+      }
+    }
+  }
+
+  /** True while any video of that playlist is still waiting, downloading or about to be retried. */
+  playlistBusy(playlistId) {
+    return Object.values(this.items).some(
+      (i) => i.playlist && i.playlist.id === playlistId && (['waiting', 'active', 'paused'].includes(i.status) || (i.status === 'error' && i.retryAt > Date.now()))
+    );
+  }
+
+  /** Counts of a playlist's videos by outcome (for the "playlist finished" notification). */
+  playlistSummary(playlistId) {
+    const items = Object.values(this.items).filter((i) => i.playlist && i.playlist.id === playlistId);
+    const count = (s) => items.filter((i) => i.status === s).length;
+    return { total: items.length, complete: count('complete'), failed: count('error'), cancelled: count('removed'), title: items[0] && items[0].playlist.title };
+  }
+
   // ---------- the download list ----------
   /**
    * @param {object} o
    * @param {{type:'video', height:number}|{type:'audio', format:'mp3'|'m4a'}} o.quality
    * @param {{cookieList?:object[], userAgent?:string, referrer?:string}} [o.secret]
+   * @param {{id:string, title:string, index:number, total:number}} [o.playlist] set for videos added from a playlist
+   * @param {number} [o.addedAt] playlist videos share one time, so they keep their order in the list
    */
-  add({ url, dir, quality, title = '', size = 0, category = null, speedLimit = 0, secret = null }) {
-    const gid = `m${crypto.randomBytes(8).toString('hex').slice(0, 15)}`;
-    this.items[gid] = {
-      gid, kind: 'media', url, dir, quality, category, speedLimit,
-      name: title || url, title,
-      secret: secret ? this.secrets.encrypt(JSON.stringify(secret)) : '',
-      status: 'waiting', addedAt: Date.now(), retries: 0,
-      totalLength: size, completedLength: 0, downloadSpeed: 0,
-      stage: '', streams: {}, partFiles: [],
-    };
+  add({ secret = null, ...o }) {
+    const gid = this.makeItem(o, secret ? this.secrets.encrypt(JSON.stringify(secret)) : '');
     this.save();
     this.schedule();
     return gid;
+  }
+
+  makeItem({ url, dir, quality, title = '', size = 0, category = null, speedLimit = 0, playlist = null, outPrefix = '', addedAt = Date.now() }, encryptedSecret) {
+    const gid = `m${crypto.randomBytes(8).toString('hex').slice(0, 15)}`;
+    this.items[gid] = {
+      gid, kind: 'media', url, dir, quality, category, speedLimit, playlist, outPrefix,
+      name: title || url, title,
+      secret: encryptedSecret,
+      status: 'waiting', addedAt, retries: 0,
+      totalLength: size, completedLength: 0, downloadSpeed: 0,
+      stage: '', streams: {}, partFiles: [],
+    };
+    return gid;
+  }
+
+  /**
+   * Adds the chosen videos of a playlist in one go (one save, one encrypted copy of the cookies).
+   * @param {object} o
+   * @param {{id:string, title:string, total:number}} o.playlist
+   * @param {Array<{url:string, title:string, index:number}>} o.entries index = position in the playlist (1-based)
+   * @param {boolean} o.numbered put the position in front of each file name ("03 - Title")
+   * @returns {string[]} the new gids, in playlist order
+   */
+  addPlaylist({ playlist, entries, dir, quality, speedLimit = 0, category = null, secret = null, numbered = true }) {
+    const encrypted = secret ? this.secrets.encrypt(JSON.stringify(secret)) : '';
+    const now = Date.now(); // same time for all: they keep playlist order in the list and in the queue
+    const width = Math.max(2, String(playlist.total || entries.length).length);
+    const gids = entries.map((e) =>
+      this.makeItem({
+        url: e.url, dir, quality, title: e.title, category, speedLimit, addedAt: now,
+        playlist: { id: playlist.id, title: playlist.title, index: e.index, total: playlist.total || entries.length },
+        outPrefix: numbered ? `${String(e.index).padStart(width, '0')} - ` : '',
+      }, encrypted)
+    );
+    this.save();
+    this.schedule();
+    return gids;
   }
 
   secretOf(item) {
@@ -284,22 +412,25 @@ class MediaManager extends EventEmitter {
       ...formatArgs(item.quality),
       ...reqArgs,
       '-P', item.dir,
-      '-o', '%(title).150B [%(id)s].%(ext)s',
+      // Playlist videos start with their number ("03 - …") so they sort in playlist order.
+      '-o', `${cleanPrefix(item.outPrefix)}%(title).150B [%(id)s].%(ext)s`,
       '--progress', '--progress-template', PROGRESS,
-      '--print', 'before_dl:MIDO_INFO %(format_id)s|%(title)s',
+      '--print', 'before_dl:MIDO_INFO %(format_id)s|%(id)s|%(title)s',
       '--print', 'after_move:MIDO_DONE %(filepath)s',
     ];
     if (item.speedLimit > 0) args.push('-r', `${Math.round(item.speedLimit)}K`);
     args.push(item.url);
 
     let finalPath = '';
+    let videoId = '';
     let expectedStreams = 1;
     const { child, done } = this.run(args, {
       onLine: (line) => {
         if (line.startsWith('MIDO_INFO ')) {
-          const [fmt, ...t] = line.slice(10).split('|');
+          const [fmt, id, ...t] = line.slice(10).split('|');
           expectedStreams = fmt.split('+').length;
           item.expectedStreams = expectedStreams;
+          videoId = id;
           const title = t.join('|');
           if (title && title !== 'NA') {
             item.title = title;
@@ -339,7 +470,7 @@ class MediaManager extends EventEmitter {
       else if (reason === 'cancel') item.status = 'removed';
       else if (reason === 'quit') item.status = 'waiting'; // continue on next start
       else if (reason === 'restart') item.status = 'waiting';
-      else if (code === 0 && finalPath && fs.existsSync(finalPath)) {
+      else if (code === 0 && (finalPath = (finalPath && fs.existsSync(finalPath) ? finalPath : findFinalFile(item.dir, videoId, item.outPrefix)))) {
         const size = fs.statSync(finalPath).size;
         Object.assign(item, { status: 'complete', path: finalPath, name: path.basename(finalPath), totalLength: size, completedLength: size, stage: '', completedAt: Date.now() });
         this.emit('complete', item);
@@ -473,4 +604,4 @@ function killTree(child) {
   execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
 }
 
-module.exports = { MediaManager, netscapeCookies, formatArgs };
+module.exports = { MediaManager, netscapeCookies, formatArgs, findFinalFile };

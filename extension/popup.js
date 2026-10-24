@@ -88,6 +88,7 @@ async function renderPageVideo(connected) {
   $('#pv-site').textContent = page.site;
   $('#pv-title').textContent = page.title.replace(/ - YouTube$/, '');
   const btn = $('#btn-page');
+  btn.textContent = msg(page.playlist ? 'downloadThisPlaylist' : 'downloadThisVideo');
   btn.disabled = !connected;
   btn.onclick = async () => {
     btn.disabled = true;

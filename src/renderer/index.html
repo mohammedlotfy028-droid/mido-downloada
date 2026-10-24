@@ -92,10 +92,32 @@
           <div class="media-sub" id="media-sub" dir="auto"></div>
         </div>
       </div>
+      <!-- A video that is part of a YouTube playlist: offer the whole list -->
+      <div class="pl-offer" id="playlist-offer" hidden>
+        <span data-i18n="partOfPlaylist"></span>
+        <button type="button" class="btn sm-btn" id="btn-whole-playlist" data-i18n="downloadWholePlaylist"></button>
+      </div>
+      <!-- A playlist: pick the videos -->
+      <div class="playlist-box" id="playlist-box" hidden>
+        <div class="pl-head">
+          <div class="pl-meta">
+            <div class="media-title" id="pl-title" dir="auto"></div>
+            <div class="media-sub" id="pl-sub" dir="auto"></div>
+          </div>
+          <div class="pl-tools">
+            <button type="button" class="btn sm-btn" id="pl-all" data-i18n="plAll"></button>
+            <button type="button" class="btn sm-btn" id="pl-none" data-i18n="plNone"></button>
+          </div>
+        </div>
+        <div class="pl-list" id="pl-list"></div>
+        <div class="pl-count" id="pl-count" dir="auto"></div>
+      </div>
       <label id="lbl-quality" hidden>
         <span data-i18n="quality"></span>
         <select id="in-quality"></select>
       </label>
+      <label class="check" id="lbl-pl-subfolder" hidden><input type="checkbox" id="in-pl-subfolder" checked /><span data-i18n="plSubfolder"></span></label>
+      <label class="check" id="lbl-pl-number" hidden><input type="checkbox" id="in-pl-number" checked /><span data-i18n="plNumber"></span></label>
       <label id="lbl-name">
         <span data-i18n="fileName"></span>
         <input id="in-name" type="text" dir="auto" data-i18n-placeholder="fileNameHint" />

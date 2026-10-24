@@ -52,5 +52,8 @@
   },
   "downloadThisVideo": {
     "message": "حمّل الفيديو ده"
+  },
+  "downloadThisPlaylist": {
+    "message": "حمّل قائمة التشغيل"
   }
 }

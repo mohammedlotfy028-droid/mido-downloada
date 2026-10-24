@@ -112,7 +112,9 @@ function updateRow(row, d) {
 
   el.querySelector('.name').textContent = d.name;
   el.querySelector('.name').title = d.path || d.name;
-  el.querySelector('.url').textContent = d.url;
+  // Playlist videos show which playlist they belong to instead of their link.
+  el.querySelector('.url').textContent = d.playlist ? `${d.playlist.title} · ${d.playlist.index}/${d.playlist.total}` : d.url;
+  el.querySelector('.url').title = d.url;
   el.querySelector('.c-size').textContent = Format.bytes(d.totalLength, tr);
   el.querySelector('.bar span').style.width = `${pct.toFixed(1)}%`;
   el.querySelector('.pct').textContent = `${pct.toFixed(1)}%`;
@@ -207,6 +209,7 @@ async function showRowMenu(gid) {
   items.push({ type: 'separator' });
   if (d.status === 'complete') items.push({ id: 'openFile', label: a.openFile });
   if (d.status === 'complete' && !d.multiFile) items.push({ id: 'verify', label: a.verify });
+  if (d.playlist && d.status !== 'complete') items.push({ id: 'cancelPlaylist', label: a.cancelPlaylist });
   items.push({ id: 'openFolder', label: a.openFolder }, { id: 'copy', label: a.copy });
   items.push({ type: 'separator' }, { id: 'remove', label: a.remove });
   const chosen = await window.api.popupMenu(items);
@@ -271,6 +274,8 @@ async function onAction(act, gid) {
       $('#remove-name').textContent = d.name;
       $('#in-delete-file').checked = false;
       return confirmDialog($('#dlg-remove'), () => window.api.remove(gid, $('#in-delete-file').checked));
+    case 'cancelPlaylist':
+      return window.api.cancelPlaylist(gid);
     case 'verify':
       return openVerify(d);
   }
@@ -340,12 +345,22 @@ function isValidUrl(s) {
 
 /** Shows/hides the video-site part of the add dialog (preview + quality instead of name/connections). */
 function setMediaMode(on) {
-  $('#media-box').hidden = !on || !add.media;
-  $('#lbl-quality').hidden = !on || !add.media;
+  const video = on && !!add.media; // a single video
+  const list = on && !!add.playlistData; // a playlist
+  $('#media-box').hidden = !video;
+  $('#playlist-box').hidden = !list;
+  $('#playlist-offer').hidden = !video || !add.playlistUrl;
+  $('#lbl-pl-subfolder').hidden = !list;
+  $('#lbl-pl-number').hidden = !list;
+  $('#lbl-quality').hidden = !video && !list;
   $('#lbl-name').hidden = on;
   $('#lbl-split').hidden = on;
   $('#lbl-checksum').hidden = on || !!add.torrent;
-  if (!on) add.media = null;
+  if (!on) {
+    add.media = null;
+    add.playlistData = null;
+    add.playlistUrl = '';
+  }
 }
 
 function durationText(sec) {
@@ -393,6 +408,7 @@ async function loadMediaInfo(url, site, seq) {
   info.hidden = false;
   info.className = 'probe loading';
   info.textContent = tr.mediaLoading(site);
+  add.playlistData = null;
   setMediaMode(true);
   let r;
   try {
@@ -420,9 +436,110 @@ async function loadMediaInfo(url, site, seq) {
   await onQualityChange();
 }
 
+// ---------- playlists ----------
+const PL_QUALITIES = [['v:0', 'qBest'], ['v:2160', '2160p (4K)'], ['v:1440', '1440p'], ['v:1080', '1080p'], ['v:720', '720p'], ['v:480', '480p'], ['v:360', '360p'], ['v:240', '240p'], ['v:144', '144p'], ['a:mp3', 'qMp3'], ['a:m4a', 'qM4a']];
+
+/** Quality list for a playlist: we don't know each video's formats yet, so offer the usual ones. */
+function fillPlaylistQualities() {
+  const tr = t();
+  const sel = $('#in-quality');
+  sel.replaceChildren(
+    ...PL_QUALITIES.map(([value, label]) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = tr[label] || label;
+      return o;
+    })
+  );
+  const want = state.settings.mediaQuality;
+  sel.value = want === 'best' ? 'v:0' : want === 'mp3' || want === 'm4a' ? `a:${want}` : `v:${want}`;
+  if (!sel.value) sel.value = 'v:1080';
+}
+
+function selectedPlaylistEntries() {
+  const d = add.playlistData;
+  return d ? d.entries.map((e, i) => ({ ...e, index: i + 1 })).filter((e) => d.selected.has(e.id)) : [];
+}
+
+function updatePlaylistCount() {
+  const d = add.playlistData;
+  if (!d) return;
+  const chosen = selectedPlaylistEntries();
+  const total = chosen.reduce((s, e) => s + (e.duration || 0), 0);
+  $('#pl-count').textContent = t().plCount(chosen.length, d.entries.length, durationText(total));
+  document.querySelectorAll('#pl-list .pl-row input').forEach((cb) => (cb.checked = d.selected.has(cb.dataset.id)));
+}
+
+function renderPlaylist() {
+  const tr = t();
+  const d = add.playlistData;
+  $('#pl-title').textContent = d.title;
+  const all = d.entries.reduce((s, e) => s + (e.duration || 0), 0);
+  $('#pl-sub').textContent = tr.plSub(d.site, d.uploader, d.total, durationText(all)) + (d.truncated ? `\n${tr.plTruncated(d.entries.length)}` : '');
+  $('#pl-list').replaceChildren(
+    ...d.entries.map((e, i) => {
+      const row = document.createElement('label');
+      row.className = `pl-row${e.unavailable ? ' off' : ''}`;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.id = e.id;
+      cb.disabled = e.unavailable;
+      cb.onchange = () => {
+        cb.checked ? d.selected.add(e.id) : d.selected.delete(e.id);
+        updatePlaylistCount();
+      };
+      const n = document.createElement('span');
+      n.className = 'pl-n';
+      n.textContent = String(i + 1);
+      const title = document.createElement('span');
+      title.className = 'pl-t';
+      title.dir = 'auto';
+      title.textContent = e.unavailable ? tr.plUnavailable : e.title;
+      title.title = e.title;
+      const dur = document.createElement('span');
+      dur.className = 'pl-d';
+      dur.textContent = durationText(e.duration);
+      row.append(cb, n, title, dur);
+      return row;
+    })
+  );
+  updatePlaylistCount();
+}
+
+async function loadPlaylistInfo(url, site, seq) {
+  const tr = t();
+  const info = $('#probe-info');
+  info.hidden = false;
+  info.className = 'probe loading';
+  info.textContent = tr.plLoading;
+  add.media = null;
+  add.playlistData = null;
+  setMediaMode(true);
+  let r;
+  try {
+    r = await window.api.playlistInfo(url, add.requestId);
+  } catch (e) {
+    r = { ok: false, error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '') };
+  }
+  if (seq !== add.probeSeq) return;
+  if (!r.ok) {
+    setMediaMode(true);
+    info.className = 'probe warn';
+    const why = r.error === 'NO_TOOLS' ? tr.mediaNoTools : r.error === 'NOT_PLAYLIST' ? tr.notPlaylist : `${tr.mediaFail}: ${r.error}`;
+    info.textContent = add.requestId ? why : `${why}\n${tr.mediaLoginHint}`;
+    return;
+  }
+  add.playlistData = { ...r, site, selected: new Set(r.entries.filter((e) => !e.unavailable).map((e) => e.id)) };
+  info.hidden = true;
+  fillPlaylistQualities();
+  renderPlaylist();
+  setMediaMode(true);
+  await onQualityChange();
+}
+
 /** Audio goes to the Music folder, video to Video (unless the user picked a folder). */
 async function onQualityChange() {
-  if (add.dirTouched || !add.media) return;
+  if (add.dirTouched || !(add.media || add.playlistData)) return;
   const audio = $('#in-quality').value.startsWith('a:');
   add.category = audio ? 'music' : 'video';
   $('#in-dir').value = await window.api.suggestDir(add.category);
@@ -480,7 +597,7 @@ function openAddDialog(prefillUrl = '', ctx = null) {
     }
     return;
   }
-  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false, torrent: null, media: null, mediaLink: false });
+  Object.assign(add, { nameTouched: false, dirTouched: false, category: null, requestId: ctx ? ctx.requestId : null, submitted: false, torrent: null, media: null, mediaLink: false, playlistData: null, playlistUrl: '' });
   setMediaMode(false);
   $('#add-from-browser').hidden = !add.requestId;
   $('#in-url').value = prefillUrl;
@@ -529,9 +646,10 @@ async function runProbe() {
   const r = await window.api.probe(url, add.requestId);
   if (seq !== add.probeSeq) return; // a newer link was typed meanwhile
   add.mediaLink = !!r.media;
+  add.playlistUrl = r.playlistUrl || '';
   if (r.media) {
     if (!add.dirTouched) $('#in-dir').value = r.dir;
-    return loadMediaInfo(url, r.site, seq);
+    return r.playlist ? loadPlaylistInfo(url, r.site, seq) : loadMediaInfo(url, r.site, seq);
   }
   setMediaMode(false);
   add.category = r.category;
@@ -558,6 +676,31 @@ async function submitAdd(e) {
     return;
   }
   try {
+    if (add.playlistData) {
+      // A playlist: the ticked videos, one download each, in playlist order.
+      const d = add.playlistData;
+      const chosen = selectedPlaylistEntries();
+      if (!chosen.length) {
+        $('#add-error').textContent = t().noVideosSelected;
+        return;
+      }
+      const [kind, val] = $('#in-quality').value.split(':');
+      await window.api.add({
+        url,
+        dir: $('#in-dir').value.trim(),
+        mediaQuality: kind === 'a' ? { type: 'audio', format: val } : { type: 'video', height: Number(val) },
+        mediaPlaylist: {
+          id: d.id, title: d.title, total: d.total,
+          subfolder: $('#in-pl-subfolder').checked, numbered: $('#in-pl-number').checked,
+          entries: chosen.map((e) => ({ id: e.id, title: e.title, url: e.url, index: e.index })),
+        },
+        speedLimit: Number($('#in-limit').value) || 0,
+        requestId: add.requestId,
+      });
+      add.submitted = true;
+      $('#dlg-add').close();
+      return;
+    }
     if (add.media) {
       // Video site: yt-dlp with the chosen quality.
       const [kind, val] = $('#in-quality').value.split(':');
@@ -914,6 +1057,21 @@ async function init() {
 
   // Video sites: quality choice, yt-dlp update
   $('#in-quality').onchange = onQualityChange;
+  // Playlists: choose which videos; switch from "this video" to "the whole playlist"
+  $('#pl-all').onclick = () => {
+    const d = add.playlistData;
+    if (d) d.entries.forEach((e) => !e.unavailable && d.selected.add(e.id));
+    updatePlaylistCount();
+  };
+  $('#pl-none').onclick = () => {
+    if (add.playlistData) add.playlistData.selected.clear();
+    updatePlaylistCount();
+  };
+  $('#btn-whole-playlist').onclick = () => {
+    if (!add.playlistUrl) return;
+    $('#in-url').value = add.playlistUrl;
+    scheduleProbe(0);
+  };
   $('#s-ytdlp-update').onclick = async () => {
     const tr = t();
     $('#s-ytdlp-status').textContent = tr.ytdlpResult.checking;
