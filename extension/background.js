@@ -1,6 +1,6 @@
-// Mido Downloada browser extension (Manifest V3 service worker).
+// Mido Download browser extension (Manifest V3 service worker).
 // - Catches browser downloads and sends them to the app (with cookies + Referer)
-// - Right-click menu "Download with Mido Downloada"
+// - Right-click menu "Download with Mido Download"
 // - Notices videos/audio a page plays, so the popup can send them to the app
 importScripts('capture-rules.js');
 

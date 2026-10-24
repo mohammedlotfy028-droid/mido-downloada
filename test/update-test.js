@@ -17,8 +17,8 @@ const DEBUG = 9335;
 const pkg = require('../package.json');
 const [maj, min, patch] = pkg.version.split('.').map(Number);
 const NEXT = `${maj}.${min}.${patch + 1}`;
-const exe = path.join(ROOT, 'dist', 'win-unpacked', 'Mido Downloada.exe');
-const installer = path.join(ROOT, 'dist', `Mido Downloada Setup ${pkg.version}.exe`);
+const exe = path.join(ROOT, 'dist', 'win-unpacked', 'Mido Download.exe');
+const installer = path.join(ROOT, 'dist', `Mido Download Setup ${pkg.version}.exe`);
 const updaterCache = path.join(process.env.LOCALAPPDATA, 'mido-downloada-updater');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mido-upd-'));
@@ -26,7 +26,7 @@ const feed = path.join(tmp, 'feed');
 fs.mkdirSync(feed);
 
 // Fake release NEXT: the same installer file under the new name + a latest.yml for it.
-const name = `Mido-Downloada-Setup-${NEXT}.exe`;
+const name = `Mido-Download-Setup-${NEXT}.exe`;
 fs.copyFileSync(installer, path.join(feed, name));
 const buf = fs.readFileSync(installer);
 const sha512 = crypto.createHash('sha512').update(buf).digest('base64');

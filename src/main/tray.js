@@ -2,8 +2,8 @@
 const { Tray, Menu, nativeImage } = require('electron');
 
 const LABELS = {
-  ar: { show: 'إظهار Mido Downloada', add: 'تحميل جديد…', pauseAll: 'إيقاف الكل', resumeAll: 'استئناف الكل', quit: 'خروج', idle: 'مفيش تحميلات شغالة', active: (n, s) => `${n} شغال · ${s}` },
-  en: { show: 'Show Mido Downloada', add: 'New download…', pauseAll: 'Pause all', resumeAll: 'Resume all', quit: 'Quit', idle: 'No active downloads', active: (n, s) => `${n} active · ${s}` },
+  ar: { show: 'إظهار Mido Download', add: 'تحميل جديد…', pauseAll: 'إيقاف الكل', resumeAll: 'استئناف الكل', quit: 'خروج', idle: 'مفيش تحميلات شغالة', active: (n, s) => `${n} شغال · ${s}` },
+  en: { show: 'Show Mido Download', add: 'New download…', pauseAll: 'Pause all', resumeAll: 'Resume all', quit: 'Quit', idle: 'No active downloads', active: (n, s) => `${n} active · ${s}` },
 };
 
 function speedText(bps) {
@@ -48,7 +48,7 @@ class AppTray {
     const l = LABELS[this.lang()] || LABELS.en;
     const active = list.filter((d) => d.status === 'active');
     const speed = active.reduce((s, d) => s + d.downloadSpeed, 0);
-    const text = `Mido Downloada\n${active.length ? l.active(active.length, speedText(speed)) : l.idle}`;
+    const text = `Mido Download\n${active.length ? l.active(active.length, speedText(speed)) : l.idle}`;
     if (text !== this.tooltip) {
       this.tooltip = text;
       this.tray.setToolTip(text);

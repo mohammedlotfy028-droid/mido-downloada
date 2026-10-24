@@ -134,7 +134,7 @@ class Settings {
       'max-concurrent-downloads': String(Math.max(1, v.maxConcurrent || 1)),
       'max-overall-download-limit': v.speedLimit > 0 ? `${v.speedLimit}K` : '0',
       'all-proxy': v.proxy || '',
-      'user-agent': v.userAgent || 'Mido-Downloada/0.2',
+      'user-agent': v.userAgent || 'Mido-Download/0.5',
     };
   }
 }

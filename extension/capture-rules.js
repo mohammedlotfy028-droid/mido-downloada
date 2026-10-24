@@ -1,4 +1,4 @@
-// Which browser downloads should go to Mido Downloada instead of the browser?
+// Which browser downloads should go to Mido Download instead of the browser?
 // Loaded by background.js (importScripts), so everything here is global.
 
 const MIDO_FILE_TYPES = new Set([
@@ -25,7 +25,7 @@ function midoExtOf(name) {
 /**
  * @param {{url:string, filename:string, mime:string, size:number}} d
  *   size is 0 when the server didn't say how big the file is.
- * @returns {boolean} true = send to Mido Downloada, false = let the browser download it
+ * @returns {boolean} true = send to Mido Download, false = let the browser download it
  */
 function shouldCapture(d) {
   // Links the app can't open (made inside the page, or already on disk).

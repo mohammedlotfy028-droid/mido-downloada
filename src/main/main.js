@@ -20,6 +20,46 @@ const { CATEGORIES, categoryOf } = require('../shared/categories');
 
 // Dev/test: run with a separate data folder so tests don't touch real data.
 if (process.env.MIDO_DATA_DIR) app.setPath('userData', path.resolve(process.env.MIDO_DATA_DIR));
+// Test only: pretend this folder is %APPDATA% (to test moving the old data folder).
+if (process.env.MIDO_TEST_APPDATA) {
+  app.setPath('appData', path.resolve(process.env.MIDO_TEST_APPDATA));
+  app.setPath('userData', path.join(app.getPath('appData'), app.getName()));
+}
+
+/**
+ * The app was called "Mido Downloada" before 0.5.0, and Windows keeps its data in a folder
+ * named after the app. Move that folder once, as a whole: it also holds the key that
+ * decrypts saved passwords and cookies ("Local State").
+ */
+function moveDataFromOldName() {
+  if (process.env.MIDO_DATA_DIR) return;
+  const newDir = app.getPath('userData');
+  const oldDir = path.join(app.getPath('appData'), 'Mido Downloada');
+  if (fs.existsSync(newDir) || !fs.existsSync(oldDir)) return;
+  try {
+    fs.renameSync(oldDir, newDir);
+  } catch {
+    // Old version still running (files locked)? Copy instead, all-or-nothing.
+    const tmp = `${newDir}.moving`;
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.cpSync(oldDir, tmp, { recursive: true });
+      fs.renameSync(tmp, newDir);
+    } catch (e) {
+      console.error('could not move old data folder:', e.message);
+      fs.rmSync(tmp, { recursive: true, force: true });
+      return;
+    }
+  }
+  // downloads.json remembers where our private .torrent copies are (inside the data folder).
+  const list = path.join(newDir, 'downloads.json');
+  if (fs.existsSync(list)) {
+    const esc = (p) => JSON.stringify(p).slice(1, -1);
+    fs.writeFileSync(list, fs.readFileSync(list, 'utf8').split(esc(oldDir)).join(esc(newDir)));
+  }
+  console.log(`moved data folder: ${oldDir} -> ${newDir}`);
+}
+moveDataFromOldName();
 
 // Only one copy of the app may run (two aria2 instances would fight over the session file).
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -130,7 +170,7 @@ function createWindow() {
     height: 700,
     minWidth: 860,
     minHeight: 500,
-    title: 'Mido Downloada',
+    title: 'Mido Download',
     icon: ICON,
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#16181d' : '#f6f7f9',
@@ -508,13 +548,13 @@ app.whenReady().then(async () => {
     updater = new Updater((status) => sendToUi('ui:update', status));
     if (settings.values.autoUpdate) updater.startAutomatic();
   } catch (e) {
-    dialog.showErrorBox('Mido Downloada', `Could not start the download engine (aria2):\n${e.message}`);
+    dialog.showErrorBox('Mido Download', `Could not start the download engine (aria2):\n${e.message}`);
     quitting = true;
     app.quit();
   }
 }).catch((e) => {
   console.error('startup failed:', e);
-  dialog.showErrorBox('Mido Downloada', `Startup failed:\n${e.stack || e.message}`);
+  dialog.showErrorBox('Mido Download', `Startup failed:\n${e.stack || e.message}`);
   quitting = true;
   app.quit();
 });

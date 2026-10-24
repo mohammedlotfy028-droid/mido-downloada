@@ -176,7 +176,7 @@ async function extensionWorker() {
   check(small, 'small readme.txt was downloaded by Edge itself');
   check(!(await app.evaluate(`document.querySelector('#dlg-add').open`)), '...and did not open the app dialog');
 
-  // ---------- 6. right-click "Download with Mido Downloada" ----------
+  // ---------- 6. right-click "Download with Mido Download" ----------
   sw = await extensionWorker();
   const menuOk = await sw.evaluate(`handleMenuClick({ menuItemId: 'mido-download', linkUrl: '${BASE}/site/protected/from-menu.zip', pageUrl: '${BASE}/site/page.html' }, null)`);
   check(menuOk === true, 'right-click menu sent the link to the app');

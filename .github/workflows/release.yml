@@ -43,10 +43,10 @@ jobs:
 
       - name: Zip the browser extension
         shell: pwsh
-        run: Compress-Archive -Path extension\* -DestinationPath "dist\mido-downloada-extension-${{ github.ref_name }}.zip"
+        run: Compress-Archive -Path extension\* -DestinationPath "dist\mido-download-extension-${{ github.ref_name }}.zip"
 
       - name: Attach the extension to the release
         shell: bash
-        run: gh release upload "${GITHUB_REF_NAME}" dist/mido-downloada-extension-*.zip --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" dist/mido-download-extension-*.zip --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

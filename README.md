@@ -1,4 +1,4 @@
-# Mido Downloada
+# Mido Download
 
 برنامج إدارة تحميلات مفتوح المصدر للويندوز، مبني على Electron ومحرك [aria2](https://aria2.github.io/).
 An open-source download manager for Windows built on Electron and aria2.
@@ -29,11 +29,11 @@ The `extension/` folder (also installed next to the app: Settings → Browser �
 
 1. Open `chrome://extensions` or `edge://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and pick the `extension` folder.
-3. Click the extension icon → **Connect**, then click **Allow** in Mido Downloada.
+3. Click the extension icon → **Connect**, then click **Allow** in Mido Download.
 
 What it does:
 - Downloads you click in the browser go to the app (big files and known types; small ones stay in the browser).
-- Right-click a link, video, audio or image → **Download with Mido Downloada**.
+- Right-click a link, video, audio or image → **Download with Mido Download**.
 - Cookies and Referer are passed along, so files behind a login work.
 - The popup lists videos/audio the page played (direct files; HLS/.m3u8 streams are not supported yet).
 
@@ -56,6 +56,7 @@ node test/phase2-test.js <screenshotDir>          # phase 2 features on the real
 node test/phase3-test.js <screenshotDir>          # extension in a temporary Edge profile + the app
 node test/phase4-test.js <screenshotDir>          # torrents (local tracker+seeder), checksums, schedule, fake shutdown
 npm run dist && node test/update-test.js <dir>    # packaged app finds/downloads an update from a local server
+node test/rename-test.js <screenshotDir>          # data from the old name (Mido Downloada) moves to the new folder
 ```
 
 ## Build the installer

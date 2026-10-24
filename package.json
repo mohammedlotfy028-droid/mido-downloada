@@ -1,7 +1,7 @@
 {
   "name": "mido-downloada",
-  "productName": "Mido Downloada",
-  "version": "0.4.0",
+  "productName": "Mido Download",
+  "version": "0.5.0",
   "description": "Open-source download manager powered by aria2",
   "main": "src/main/main.js",
   "author": "Mohammed Lotfy",
@@ -15,7 +15,7 @@
   },
   "build": {
     "appId": "com.mido.downloada",
-    "productName": "Mido Downloada",
+    "productName": "Mido Download",
     "files": [
       "src/**/*",
       "resources/icon.png",
